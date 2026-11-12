@@ -1,0 +1,43 @@
+# 依赖与生成产物
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+coverage/
+/dist/
+/build/
+npm-debug.log*
+
+# 环境配置：真实配置忽略，示例配置保留
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# 网关运行状态：目前可能在根目录或 src/ 生成
+/usage-state.json
+/src/usage-state.json
+/reasoning-cache.json
+/src/reasoning-cache.json
+
+# 本地数据、调试抓包与临时目录
+/.scratch/
+/data/
+/data-windows/
+/tmp/
+/gw-logs/
+*.log
+
+# CLI 运行时产物
+..agentix-*
+.dtclaw-*
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 编辑器本地配置
+.idea/
+.vscode/

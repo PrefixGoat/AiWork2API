@@ -1,0 +1,134 @@
+# ---------------------------------------------------------------------------
+# AiWork Gateway —— 个人自托管网关容器编排
+#
+# 遵循 ADR-0001、ADR-0003 与 ADR-0005：
+# 1) 正式直连模式默认仅发布到宿主机回环地址 127.0.0.1，防范公网意外暴露
+# 2) 网关管理配置与用量统计独立持久化于 gateway-data 卷中
+# 3) 官方 CLI 状态目录通过外部只读挂载接入，重建容器严禁覆盖或污染官方登录凭据
+#
+#   模式 A：本地或内网直接调用（默认仅绑回环 127.0.0.1）
+#     docker compose up -d --build
+#     → http://127.0.0.1:${HOST_PORT:-8080}（默认 8080）
+#     （若需直接对外开放，须显式在 .env 中设置 PUBLISH_ADDR=0.0.0.0 并配置 ADMIN_PASSWORD 和 API_KEYS）
+#
+#   模式 B：域名 + 自动 HTTPS（推荐对外）
+#     .env 里填 DOMAIN、PUBLISH_ADDR=127.0.0.1
+#     docker compose --profile tls up -d --build
+#     → https://你的域名
+# ---------------------------------------------------------------------------
+services:
+  aiwork:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aiwork-gateway:latest
+    # 同一台机器跑多个实例时用 .env 的 CONTAINER_NAME 区分，默认 aiwork
+    container_name: ${CONTAINER_NAME:-aiwork}
+    restart: unless-stopped
+    environment:
+      # ADR-0012：默认不设管理口令 —— 管理权限随调用凭据授予，页面打开即用。
+      # 需要加固时（例如把端口映射到公网）取消下面一行的注释并设置 ADMIN_PASSWORD。
+      # ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      API_KEYS: "${API_KEYS:-}"
+      GATEWAY_DATA_DIR: /data
+
+      # 账号与上游配置（直连模式）
+      UPSTREAM: "${UPSTREAM:-direct}"
+      ROUTER_BASE_URL: "${ROUTER_BASE_URL:-https://aiwork-api.dtagi.cn}"
+      UPSTREAM_ACCOUNTS: "${UPSTREAM_ACCOUNTS:-}"
+      AGENTIX_STATE_DIR: /accounts/default
+
+      # 调度与尝试上限
+      MAX_ACCOUNT_ATTEMPTS: "${MAX_ACCOUNT_ATTEMPTS:-3}"
+      MAX_CONCURRENCY_PER_ACCOUNT: "${MAX_CONCURRENCY_PER_ACCOUNT:-10}"
+      SESSION_BINDING_TTL_MS: "${SESSION_BINDING_TTL_MS:-3600000}"
+
+      # 服务端可选内存历史续接（默认启用 1）
+      ENABLE_IN_MEMORY_CONTINUATION: "${ENABLE_IN_MEMORY_CONTINUATION:-1}"
+      MAX_RESPONSE_HISTORY: "${MAX_RESPONSE_HISTORY:-500}"
+      RESPONSE_HISTORY_TTL_SECONDS: "${RESPONSE_HISTORY_TTL_SECONDS:-3600}"
+
+      # 调试抓包（默认关闭 0；开启后有界自动清理）
+      # 上限三项的名字与单位对齐 src/api-bridge.js：字节 / 秒，不是 MB / 小时
+      DEBUG_DUMP: "${DEBUG_DUMP:-0}"
+      DUMP_DIR: /data/gw-logs
+      DEBUG_DUMP_MAX_FILES: "${DEBUG_DUMP_MAX_FILES:-50}"
+      DEBUG_DUMP_MAX_BYTES: "${DEBUG_DUMP_MAX_BYTES:-52428800}"
+      DEBUG_DUMP_MAX_AGE_SEC: "${DEBUG_DUMP_MAX_AGE_SEC:-86400}"
+
+      # 基础安全与限流
+      PUBLIC_UI: "${PUBLIC_UI:-1}"
+      RATE_LIMIT_PER_MIN: "${RATE_LIMIT_PER_MIN:-60}"
+      CORS_ORIGIN: "${CORS_ORIGIN:-*}"
+      ALLOW_IPS: "${ALLOW_IPS:-}"
+      LOG_REQUESTS: "${LOG_REQUESTS:-1}"
+      TRUST_PROXY: "${TRUST_PROXY:-0}"
+      MAX_IMAGES: "${MAX_IMAGES:-8}"
+      MAX_BODY_MB: "${MAX_BODY_MB:-12}"
+      MODEL_OVERRIDE: "${MODEL_OVERRIDE:-1}"
+      THINKING_LEVEL: "${THINKING_LEVEL:-}"
+      UPSTREAM_TIMEOUT_MS: "${UPSTREAM_TIMEOUT_MS:-300000}"
+      REASONING: "${REASONING:-off}"
+      MAX_SESSIONS: "${MAX_SESSIONS:-50}"
+
+      # 状态与持久化
+      STATE_PATH: /data/usage-state.json
+
+      # 容器内部端口与绑定（内部绑 0.0.0.0 接受映射；宿主端默认 127.0.0.1 回环）
+      # 容器内监听端口；要和下面的端口映射对齐（CONTAINER_PORT 默认 8080）。
+      PORT: "${CONTAINER_PORT:-8080}"
+      BIND: 0.0.0.0
+    volumes:
+      # 网关数据持久化（存放 admin.json, accounts.json, api-keys.json, usage-state.json）
+      - gateway-data:/data
+      # 官方 CLI 状态目录（只读挂载，保护官方凭据不被写入或覆盖）
+      # 左值是宿主机路径，取自 .env 的 AGENTIX_HOST_STATE_DIR；留空时用下面这个默认值。
+      # Linux 常见 ~/.local/share/agentix，Windows 常见 ~/.agentix——quickstart.sh 会按探测结果写入 .env。
+      - ${AGENTIX_HOST_STATE_DIR:-~/.local/share/agentix}:/accounts/default:ro
+      # 多账号示例（自行追加，容器内路径不要重复）：
+      # - /path/to/acc1/agentix:/accounts/acc1:ro
+      # - /path/to/acc2/agentix:/accounts/acc2:ro
+    ports:
+      # 默认绑定回环地址 127.0.0.1，对外提供服务请配合 Caddy（TLS profile）或显式设置 PUBLISH_ADDR=0.0.0.0
+      - "${PUBLISH_ADDR:-127.0.0.1}:${HOST_PORT:-8080}:${CONTAINER_PORT:-8080}"
+    healthcheck:
+      # $$ 是 compose 的转义：留给容器内的 shell 展开成 PORT，否则会在这里被 compose 替换成空串
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:$${PORT:-8080}/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # 可选：自动申请并续期 HTTPS 证书
+  caddy:
+    image: caddy:2-alpine
+    container_name: ${CONTAINER_NAME:-aiwork}-caddy
+    restart: unless-stopped
+    profiles: ["tls"]
+    depends_on:
+      - aiwork
+    environment:
+      DOMAIN: "${DOMAIN:-}"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+volumes:
+  gateway-data:
+  caddy-data:
+  caddy-config:

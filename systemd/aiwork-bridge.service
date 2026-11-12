@@ -1,0 +1,27 @@
+# 备选方案：不用 Docker，直接在 Linux 上跑（systemd 用户级服务）
+# 使用前把下面两处路径改成你实际部署的位置：
+#   WorkingDirectory / ExecStart 里的 /opt/aiwork-gateway
+# 以及把配置写进 ~/.config/aiwork-gateway.env（参考 .env.example）
+
+[Unit]
+Description=AiWork Gateway (OpenAI-compatible HTTP bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aiwork-gateway
+EnvironmentFile=%h/.config/aiwork-gateway.env
+ExecStart=/usr/bin/env node /opt/aiwork-gateway/src/api-bridge.js
+Restart=always
+RestartSec=5
+# 收到 SIGTERM 后等桥接层把在途请求收尾
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# 一点基础加固
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

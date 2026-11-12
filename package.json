@@ -1,0 +1,10 @@
+{
+  "name": "aiwork-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AiWork Gateway - Local multi-account reverse proxy and protocol adapter",
+  "scripts": {
+    "check": "node scripts/check-syntax.js",
+    "test": "node scripts/run-all-tests.js"
+  }
+}

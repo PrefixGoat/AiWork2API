@@ -1,0 +1,26 @@
+.git
+.gitignore
+.scratch/
+.env
+.env.*
+!.env.example
+node_modules
+usage-state.json
+data/
+*.log
+*.md
+!README.md
+!THIRD-PARTY-NOTICES.md
+LICENSE
+!LICENSE
+.vscode
+.idea
+systemd
+tests/
+docs/
+
+# CLI 与运行临时产物
+tmp/
+..agentix-*
+.dtclaw-*
+*.tmp

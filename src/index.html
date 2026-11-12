@@ -1,0 +1,4344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AiWork 网关 · 运维仪表盘</title>
+<style>
+  :root{
+    --bg:#f4f5f9; --surface:#fff; --panel:#fbfbfe;
+    --primary:#4f46e5; --primary-weak:#eef0ff;
+    --text:#1e2330; --muted:#7a8194; --border:#e6e8f0;
+    --ok:#16a34a; --warn:#d97706; --danger:#dc2626;
+    --shadow:0 1px 3px rgba(20,25,40,.06),0 6px 20px rgba(20,25,40,.05);
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--text); font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{display:flex;height:100vh}
+
+  /* 左侧主导航：替代顶部「管理后台 / 用量 / 清空会话」三个浮层按钮 */
+  .tabs{width:180px;flex:0 0 180px;background:var(--surface);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;gap:2px;padding:12px 10px;overflow-y:auto}
+  .tabs .brand{display:flex;align-items:center;gap:8px;padding:4px 6px 12px;font-weight:700;font-size:13.5px}
+  .tab{display:flex;align-items:center;gap:9px;width:100%;padding:9px 10px;border:1px solid transparent;
+    border-radius:9px;background:none;font:inherit;font-size:13px;color:#3f4254;text-align:left;
+    cursor:pointer;white-space:nowrap}
+  .tab:hover{background:var(--panel)}
+  .tab.on{background:#eef0ff;border-color:#dfe2ff;color:#2b2f66;font-weight:650}
+  .tab .ic{width:16px;text-align:center;flex:0 0 16px;font-size:13px}
+  .tab .cnt{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .tabs-foot{margin-top:auto;padding:10px 6px 2px;border-top:1px solid var(--border);
+    font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .body{flex:1;display:flex;flex-direction:column;min-width:0}
+
+  /* TAB 视图容器：同一时刻只显示一个。
+     用 :not(.on) 提高特异性，避免 .chat 的 display:flex 把隐藏规则盖掉。 */
+  .view{flex:1;min-height:0;min-width:0}
+  .view:not(.on){display:none}
+  .view.on{display:flex;flex-direction:column}
+  .pane{padding:16px 18px 22px;overflow-y:auto;flex:1;min-height:0}
+  .pane-sec{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    padding:14px 16px;box-shadow:var(--shadow);margin-bottom:14px}
+  .pane-sec > h3{margin:0 0 4px;font-size:12px;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--muted);font-weight:650}
+  .pane-sec .pane-desc{font-size:11.5px;color:var(--muted);margin:0 0 10px;line-height:1.5}
+  /* 设置页：标签定宽、输入框紧跟，避免中间大片空白 */
+  .pane .field{justify-content:flex-start}
+  .pane .field > label{flex:0 0 156px;color:var(--muted);font-size:12px}
+  .pane .field input[type="number"], .pane .field input[type="text"], .pane .field select{max-width:240px}
+  /* 设置项：一行「标题 + 控件」，紧跟一句人话说明；说明与输入框左边对齐。
+     单位放在控件右侧做后缀，标题里就不再写「（秒）」。 */
+  .set-item{margin:12px 0}
+  .set-item .field{margin:0}
+  .set-item .set-desc{margin:4px 0 0 164px;font-size:11.5px;color:var(--muted);line-height:1.5}
+  .pane .field input[type="checkbox"]{width:15px;height:15px;accent-color:var(--primary);flex:0 0 auto}
+  /* 端口命令要能整行读出来，长路径别被截断 */
+  #portCmd{font-family:var(--mono);font-size:11px;color:var(--text);background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:1px 6px;word-break:break-all}
+  /* 端口命令要能整行读出来，长路径别被截断 */
+  #portCmd{font-family:var(--mono);font-size:11px;color:var(--text);background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:1px 6px;word-break:break-all}
+  .set-unit{font-size:12px;color:var(--muted);font-family:var(--mono);flex:0 0 auto}
+
+  /* header */
+  header{
+    height:60px;flex:0 0 auto;display:flex;align-items:center;gap:12px;
+    padding:0 18px;background:var(--surface);border-bottom:1px solid var(--border);position:relative;z-index:80;
+  }
+  .brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:16px}
+  .logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#4f46e5,#7c3aed);
+    display:grid;place-items:center;color:#fff;font-size:15px;font-weight:800}
+  .spacer{flex:1}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);
+    background:var(--panel);border:1px solid var(--border);padding:5px 11px;border-radius:999px}
+  #modelChip{cursor:pointer}
+  #modelChip:hover{border-color:#c9cddb;color:var(--text)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+  .dot.off{background:var(--danger)}
+  button{font-family:inherit;cursor:pointer;border:1px solid var(--border);background:var(--surface);
+    color:var(--text);padding:8px 14px;border-radius:10px;font-size:13.5px;transition:.15s}
+  button:hover{border-color:#c9cddb;background:var(--panel)}
+  button.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+  button.primary:hover{background:#4338ca}
+  button.ghost{border-color:transparent;background:transparent}
+  button.ghost:hover{background:var(--primary-weak);border-color:transparent}
+  button.ghost.on{background:var(--primary-weak);border-color:#dcdcff;color:#4338ca}
+  header button.on{background:var(--primary-weak);border-color:#dcdcff;color:#4338ca}
+  button.sm{padding:4px 9px;font-size:12px;border-radius:8px}
+
+  /* layout */
+  /* min-width:0：否则窄屏下宽表（表格自带 min-width）会把整个 .main 撑出视口，
+     .table-wrap 的横向滚动也就永远不触发。 */
+  .main{flex:1;display:flex;min-height:0;min-width:0}
+  .chat{flex:1;display:flex;flex-direction:column;min-width:0}
+  .side{width:300px;flex:0 0 300px;background:var(--surface);border-left:1px solid var(--border);
+    display:flex;flex-direction:column;overflow-y:auto}
+
+  /* dashboard-first：首屏常驻账号池 / 用量额度 / 积分 / 模型成本 */
+  .dash{flex:0 0 auto;padding:14px 18px 6px;background:var(--bg)}
+  .dash-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:10px}
+  .dash-head h2{margin:0;font-size:17px;letter-spacing:-.2px}
+  .dash-sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .dash-actions{display:flex;gap:6px;flex-wrap:wrap}
+  .dash-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+  .dash-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:12px 14px;
+    box-shadow:var(--shadow);min-width:0;display:flex;flex-direction:column;gap:6px}
+  .dash-card h3{margin:0;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+    font-weight:650;display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .dash-kpi{font-size:24px;font-weight:750;font-family:var(--mono);letter-spacing:-.6px;line-height:1.15}
+  /* 「可用」在前、「已用」在后；可用用成功色，一眼看出还能跑多少 */
+  .dash-kpi-pair{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+  .dash-kpi.avail{color:var(--ok)}
+  .dash-kpi.avail small{color:var(--ok);opacity:.7}
+  .dash-kpi small{font-size:12px;color:var(--muted);font-weight:500;font-family:inherit;letter-spacing:0}
+  .dash-kpi-sub{font-size:11px;color:var(--muted);min-height:16px;line-height:1.4}
+  .dash-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted)}
+  .dash-row b{font-family:var(--mono);color:var(--text);font-weight:650}
+  .dash-list{display:flex;flex-direction:column;gap:4px;max-height:88px;overflow:auto}
+  .dash-acc{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
+  .dash-acc .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+  .dash-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:0 0 7px}
+  .dash-dot.warn{background:var(--warn)} .dash-dot.err{background:var(--danger)} .dash-dot.off{background:var(--muted)}
+  .dash-progress{height:6px;border-radius:999px;background:var(--border);overflow:hidden}
+  .dash-progress>i{display:block;height:100%;background:var(--ok);border-radius:999px;transition:.3s}
+  .dash-progress.warn>i{background:var(--warn)} .dash-progress.danger>i{background:var(--danger)}
+  .dash-note{font-size:10.5px;color:var(--muted);line-height:1.45}
+  /* 积分卡按账号分条：总览（可用/总额 + 总进度条）在上，逐账号明细在下 */
+  .dash-credits-accts{margin-top:2px;padding-top:7px;border-top:1px solid var(--border);
+    display:flex;flex-direction:column;gap:6px}
+  .dash-credits-hd{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:650}
+  .dash-credits-list{display:flex;flex-direction:column;gap:7px}
+  .dash-ca{display:flex;flex-direction:column;gap:3px;border-radius:6px;padding:1px 2px;cursor:pointer}
+  .dash-ca:hover{background:var(--bg)}
+  .dash-ca-top{display:flex;align-items:flex-start;gap:6px;font-size:11px;color:var(--muted);min-width:0}
+  /* 账号名完整显示：不截断、不设最大宽度，超长时按字符换行，数值列始终可见 */
+  .dash-ca-name{font-family:var(--mono);color:var(--text);min-width:0;overflow-wrap:anywhere}
+  .dash-ca-plan{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);flex:0 1 auto}
+  .dash-ca-num{margin-left:auto;font-family:var(--mono);color:var(--text);white-space:nowrap}
+  .dash-ca-num i{font-style:normal;color:var(--muted)}
+  .dash-ca .dash-progress{height:4px}
+  .dash-ca.bad .dash-ca-name,.dash-ca.bad .dash-ca-plan{color:var(--muted);opacity:.7}
+  .dash-ca.bad .dash-progress{background:transparent;border:1px dashed var(--border)}
+  .dash-ca.bad .dash-progress>i{width:0}
+  tr.row-focus{background:rgba(29,158,117,.12);box-shadow:inset 3px 0 0 var(--ok)}
+  .dash-bad{background:#fdecec;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:6px 8px;font-size:11px;line-height:1.4}
+  .dash-chart{position:relative;height:98px;margin-top:2px}
+  .dash-chart canvas{width:100%!important;height:100%!important}
+  .dash-select{width:100%;border:1px solid var(--border);border-radius:8px;padding:6px 8px;font:inherit;
+    font-size:12.5px;background:var(--panel);color:var(--text);outline:none}
+  .dash-model-meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--muted);line-height:1.4}
+  @media (max-width:1180px){ .dash-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  @media (max-height:780px){ .dash{max-height:46vh;overflow:auto} }
+  @media (max-width:700px){
+    header{height:auto;min-height:56px;flex-wrap:wrap;padding:8px 10px;row-gap:6px}
+    header .spacer{display:none}
+    header button{white-space:nowrap;flex:0 0 auto}
+    .app{height:auto;min-height:100vh}
+    .main{min-height:60vh}
+    .dash{max-height:none;overflow:visible;padding:10px 10px 4px}
+    .dash-grid{grid-template-columns:1fr}
+    .dash-head h2{font-size:15px}
+    /* 窄屏放不下 156px 的标签缩进，说明改成整行铺开 */
+    .set-item .set-desc{margin-left:0}
+  }
+
+  /* messages */
+  .msgs{flex:1;overflow-y:auto;padding:24px 22px;display:flex;flex-direction:column;gap:18px}
+  .empty{margin:auto;text-align:center;color:var(--muted)}
+  .empty h2{color:var(--text);font-weight:600;margin:8px 0 6px;font-size:20px}
+  .row{display:flex;gap:12px;max-width:820px;width:100%;margin:0 auto}
+  .avatar{width:32px;height:32px;border-radius:9px;flex:0 0 32px;display:grid;place-items:center;
+    font-size:13px;font-weight:700;color:#fff}
+  .avatar.user{background:#0ea5e9}
+  .avatar.bot{background:linear-gradient(135deg,#4f46e5,#7c3aed)}
+  .bubble{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:12px 16px;
+    box-shadow:var(--shadow);max-width:100%;overflow-wrap:anywhere;white-space:pre-wrap}
+  .row.user .bubble{background:var(--primary-weak);border-color:#dcdcff}
+  .meta{font-size:11.5px;color:var(--muted);margin-top:8px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .badge{background:var(--panel);border:1px solid var(--border);padding:2px 8px;border-radius:7px;font-family:var(--mono);font-size:11px}
+  .thinking{color:var(--muted);font-style:italic}
+  .typing{display:inline-block;width:18px}
+  .typing::after{content:'▌';animation:blink 1s steps(2) infinite}
+  @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+
+  /* composer */
+  .composer{flex:0 0 auto;border-top:1px solid var(--border);background:var(--surface);padding:14px 22px 16px}
+  .composer-inner{max-width:820px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
+  textarea{width:100%;resize:none;border:1px solid var(--border);border-radius:12px;padding:12px 14px;
+    font:inherit;color:var(--text);background:var(--panel);outline:none;max-height:220px}
+  textarea:focus{border-color:var(--primary);background:#fff}
+  .composer-bar{display:flex;align-items:center;gap:10px}
+  .hint{font-size:12px;color:var(--muted)}
+  .tok-live{margin-left:auto;font-size:12px;color:var(--muted);font-family:var(--mono)}
+
+  /* sidebar sections */
+  .sec{padding:18px 16px 8px}
+  .sec h3{margin:0 0 12px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:650}
+  .models{display:flex;flex-direction:column;gap:8px}
+  .model-card{border:1px solid var(--border);border-radius:11px;padding:10px 12px;cursor:pointer;transition:.15s;background:var(--panel)}
+  .model-card:hover{border-color:#c9cddb;background:#fff}
+  .model-card.active{border-color:var(--primary);background:var(--primary-weak);box-shadow:0 0 0 2px rgba(79,70,229,.12)}
+  .model-card .nm{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .model-card .id{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:2px}
+  .tag{font-size:10.5px;padding:1px 7px;border-radius:999px;font-weight:600;white-space:nowrap}
+  .tag.cost-low{background:#e8f7ee;color:#15803d}
+  .tag.cost-mid{background:#fef3e2;color:#b45309}
+  .tag.cost-high{background:#fdecec;color:#b91c1c}
+  .tag.reason{background:#eef0ff;color:#4338ca}
+
+  .stats{display:flex;flex-direction:column;gap:10px}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:11px 13px}
+  .stat .lbl{font-size:11.5px;color:var(--muted)}
+  .stat .val{font-size:19px;font-weight:700;font-family:var(--mono);margin-top:2px}
+  .stat .val.small{font-size:15px}
+  .stat .sub{font-size:11px;color:var(--muted);margin-top:3px}
+  .progress{height:7px;border-radius:999px;background:var(--border);overflow:hidden;margin-top:8px}
+  .progress>i{display:block;height:100%;background:var(--ok);border-radius:999px;transition:.3s}
+  .progress.warn>i{background:var(--warn)} .progress.danger>i{background:var(--danger)}
+  .note{font-size:11px;color:var(--muted);line-height:1.5;padding:2px 2px 8px}
+  .field{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0}
+  .field label{font-size:12px;color:var(--muted)}
+  .field input{width:110px;border:1px solid var(--border);border-radius:8px;padding:5px 8px;font:inherit;font-family:var(--mono);font-size:13px}
+  .row-btns{display:flex;gap:8px}
+  .row-btns button{flex:1}
+  /* 内联到 TAB 页后宽度变宽，按钮不再需要等分撑满 */
+  .pane .row-btns{flex-wrap:wrap}
+  .pane .row-btns button{flex:0 0 auto}
+
+  /* 独立浮层面板 */
+  .panel{position:fixed;z-index:90;background:var(--surface);border:1px solid var(--border);
+    border-radius:14px;box-shadow:0 14px 44px rgba(20,25,40,.18);padding:14px 15px 15px;
+    display:none;max-height:calc(100vh - 88px);overflow-y:auto}
+  .panel.open{display:block;animation:pop .14s ease-out}
+  @keyframes pop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  .panel h4{margin:15px 0 8px;font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:650}
+  .p-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+  .p-head strong{font-size:14px}
+  .p-head-r{display:flex;align-items:center;gap:4px}
+  .hero{background:linear-gradient(135deg,#eef0ff,#f8f8ff);border:1px solid #e0e2ff;border-radius:12px;padding:12px 14px}
+  .hero .lbl{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .hero .val{font-size:25px;font-weight:750;font-family:var(--mono);letter-spacing:-.5px;margin-top:2px}
+  .hero .sub{font-size:11px;color:var(--muted);margin-top:3px}
+  .pill{background:#fff;border:1px solid #e0e2ff;border-radius:999px;padding:1px 7px;font-size:10.5px;font-family:var(--mono);color:#4338ca}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+
+  /* 用量分析（票 08）：范围切换 / KPI / 趋势 / 三张分组表 */
+  .usage-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .usage-range{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0 6px}
+  .usage-toggle{background:var(--surface)}
+  .usage-toggle.on{background:var(--primary-weak);border-color:#dcdcff;color:#4338ca;font-weight:650}
+  .usage-custom{display:none;align-items:center;gap:6px;flex-wrap:wrap;font-size:11.5px;color:var(--muted)}
+  .usage-custom.on{display:inline-flex}
+  .usage-custom input[type="date"]{border:1px solid var(--border);border-radius:8px;padding:3px 7px;
+    font:inherit;font-size:12px;font-family:var(--mono);background:var(--surface);color:var(--text)}
+  .usage-kpi{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+  .usage-kpi .kpi{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:9px 10px;min-width:0}
+  .usage-kpi .kpi .n{font-family:var(--mono);font-size:16px;font-weight:700;letter-spacing:-.3px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .usage-kpi .kpi .t{font-size:10.5px;color:var(--muted);margin-top:2px;display:flex;align-items:center;gap:4px}
+  /* 绘图区：外层定高，顶部留给画布内的图例，内层撑满；
+     底部「起止时间 + 合计」那一行在包裹层之外，不会被图例压住。 */
+  .usage-chart-wrap{position:relative;height:180px}
+  .usage-chart{display:flex;align-items:flex-end;gap:2px;height:100%;padding:8px 8px 0;
+    background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow-x:auto}
+  /* 画布由渲染层动态创建；撑满包裹层，Chart.js 才能按 180px 自动算尺寸。 */
+  .usage-chart>canvas{display:block;width:100%!important;height:100%!important}
+  /* 点少时把柱子摊开（space-between），点多时自然铺满并横向滚动 */
+  .usage-chart.sparse{justify-content:space-between}
+  .usage-chart .bar{flex:1 1 0;min-width:3px;max-width:40px;height:100%;display:flex;align-items:flex-end}
+  .usage-chart .bar>i{display:block;width:100%;min-height:1px;border-radius:2px 2px 0 0;
+    background:linear-gradient(180deg,#818cf8,#4f46e5)}
+  .usage-chart .bar.zero>i{background:var(--border)}
+  .usage-chart .bar.fail>i{background:linear-gradient(180deg,#fca5a5,#dc2626)}
+  .usage-chart-legend{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:10.5px;
+    color:var(--muted);font-family:var(--mono);margin:4px 2px 0}
+  /* 中间那格是「合计 …」，空间不够时省略，不折行去挤绘图区。 */
+  .usage-chart-legend>span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .usage-chart-legend>span:nth-child(2){flex:1 1 auto;text-align:center}
+  /* 空态铺在绘图区上，绝对定位所以不撑高容器。 */
+  .usage-chart-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    text-align:center;padding:0 16px;font-size:12px;color:var(--muted);line-height:1.6}
+  .usage-table{width:100%;min-width:560px;border-collapse:collapse;font-size:12px}
+  .usage-table th{text-align:left;font-weight:600;color:var(--muted);font-size:10.5px;
+    letter-spacing:.06em;text-transform:uppercase;padding:7px 10px;background:var(--panel);
+    border-bottom:1px solid var(--border);white-space:nowrap}
+  .usage-table td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+  .usage-table tbody tr:last-child td{border-bottom:none}
+  .usage-table tbody tr:hover{background:var(--panel)}
+  .usage-table .num{text-align:right;font-family:var(--mono);white-space:nowrap}
+  .usage-table .name{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .usage-table .err-num{color:var(--danger)}
+  .usage-empty{display:none;background:var(--panel);border:1px dashed var(--border);border-radius:10px;
+    padding:14px 12px;text-align:center;font-size:12px;color:var(--muted);line-height:1.6}
+  .usage-empty.on{display:block}
+  /* 只看某个账号时的过滤条：从账号池跳过来才有，明确写出当前条件与出口 */
+  .usage-filter{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px;
+    padding:6px 10px;border:1px solid #dcdcff;background:var(--primary-weak);border-radius:8px;font-size:12px}
+  .usage-filter.on{display:flex}
+  .usage-filter strong{font-family:var(--mono);font-weight:650}
+  /* 「按账号」表里的账号是去日志的入口：按钮保证键盘可达，hover/聚焦都有反馈 */
+  .usage-account-link{background:none;border:none;padding:0;margin:0;font:inherit;color:var(--primary);
+    cursor:pointer;text-align:left;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .usage-account-link:hover,.usage-account-link:focus-visible{text-decoration:underline}
+  @media (max-width:1000px){ .usage-kpi{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  /* 窄屏：高度降一档但刻度仍可读；不再横向滚动，图例整行不折。 */
+  @media (max-width:400px){
+    .usage-chart-wrap{height:150px}
+    .usage-chart{overflow-x:hidden;padding:6px 6px 0}
+    .usage-chart-legend{font-size:10px;gap:4px;white-space:nowrap}
+  }
+  .sesslist{margin-top:6px;display:flex;flex-direction:column;gap:6px;max-height:210px;overflow:auto}
+  .sess{border:1px solid var(--border);border-radius:8px;padding:6px 8px;background:var(--panel)}
+  .sess .top{display:flex;justify-content:space-between;gap:6px;align-items:baseline}
+  .sess .lab{font-size:11.5px;color:#3f4254;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  .sess .cnt{font-size:10.5px;font-family:var(--mono);color:#4338ca;background:#eef0ff;border-radius:999px;padding:0 6px;white-space:nowrap}
+  .sess .meta{display:flex;justify-content:space-between;font-size:10.5px;font-family:var(--mono);color:var(--muted);margin-top:3px}
+  details.settings{border-top:1px solid var(--border);margin-top:15px;padding-top:10px}
+  details.settings summary{cursor:pointer;font-size:12px;color:var(--muted);list-style:none;user-select:none}
+  details.settings summary::-webkit-details-marker{display:none}
+  details.settings summary::before{content:'▸ '}
+  details.settings[open] summary::before{content:'▾ '}
+  .chk{display:flex;align-items:center;gap:8px;font-size:13px;margin:10px 0 14px;cursor:pointer}
+  .chk input{width:15px;height:15px;accent-color:var(--primary)}
+  .panel .note{padding:0 0 8px}
+
+  /* 访问密钥闸门（公网打开页面时要求输入自己的 Key） */
+  .gate{position:fixed;inset:0;background:rgba(20,25,40,.45);display:none;align-items:center;
+    justify-content:center;z-index:200;padding:16px}
+  .gate.open{display:flex}
+  .gate-box{background:var(--surface);border-radius:16px;padding:22px 24px;width:100%;max-width:360px;
+    box-shadow:0 24px 60px rgba(20,25,40,.3)}
+  .gate-box h3{margin:0 0 6px;font-size:16px}
+  .gate-box p{margin:0 0 14px;font-size:12.5px;color:var(--muted);line-height:1.55}
+  .gate-box input{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 12px;
+    font:inherit;font-family:var(--mono);font-size:13px;outline:none;background:var(--panel)}
+  .gate-box input:focus{border-color:var(--primary);background:#fff}
+  .gate-box button{width:100%;margin-top:12px}
+  .gate-err{color:var(--danger);font-size:12px;margin-top:8px;min-height:16px}
+
+  /* 轻量提示条：只在需要告诉用户「刚才那步为什么没成」时出现，不阻塞操作。
+     配色走主题变量，与页面其它表面保持一致；抬到输入区上方，避免压住 composer。 */
+  .toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%) translateY(8px);
+    background:var(--text);color:var(--surface);font-size:12.5px;line-height:1.5;
+    padding:9px 14px;border-radius:10px;max-width:min(560px,calc(100vw - 32px));
+    box-shadow:var(--shadow);opacity:0;pointer-events:none;
+    transition:opacity .18s ease,transform .18s ease;z-index:9999}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  .key-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+  .key-card.revoked{opacity:.65;border-style:dashed}
+  .key-card-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:4px}
+  .key-card-req{font-size:11px;font-family:var(--mono);color:var(--muted)}
+
+  /* 上游账号卡片与弹窗 */
+  .acc-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+  /* 账号池表格（ADR-0016）：桌面为主，窄屏横向滚动，首列吸附便于对行 */
+  .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+  .table-toolbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .acct-table{width:100%;min-width:960px;border-collapse:collapse;font-size:12px}
+  .acct-table th{position:sticky;top:0;text-align:left;font-weight:600;color:var(--muted);
+    font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:8px 10px;
+    background:var(--panel);border-bottom:1px solid var(--border);white-space:nowrap}
+  .acct-table td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+  .acct-table tbody tr:last-child td{border-bottom:none}
+  .acct-table tbody tr:hover{background:var(--panel)}
+  .acct-table tr.row-off{opacity:.55}
+  .acct-table th:first-child,.acct-table td:first-child{position:sticky;left:0;background:var(--surface);z-index:1}
+  .acct-table tr.row-off td:first-child{background:var(--surface)}
+  .acct-name{font-weight:600;color:var(--text);white-space:nowrap}
+  .acct-sub{font-size:10.5px;color:var(--muted);line-height:1.5;white-space:nowrap}
+  .acct-table .num{font-family:var(--mono);white-space:nowrap}
+  .acct-table .ta-r{text-align:right}
+  .acct-table .err-num{color:var(--danger)}
+  .usage-cell{font-family:var(--mono);min-width:150px}
+  /* 账号池「用量」单元格是去用量页的入口：链接外观 + hover/聚焦反馈，原生 button 保证键盘可达 */
+  .usage-link{display:block;width:100%;margin:0;padding:0;background:none;border:none;border-radius:6px;
+    font:inherit;color:inherit;text-align:left;cursor:pointer}
+  .usage-link span{display:block}
+  .usage-link:hover,.usage-link:focus-visible{color:var(--primary);text-decoration:underline}
+  .usage-link:focus-visible{outline:2px solid var(--primary-weak);outline-offset:1px}
+  .acct-badge{display:inline-block;padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:600;white-space:nowrap}
+  .acct-badge.ok{background:#e8f7ee;color:#15803d;border:1px solid #bbf7d0}
+  .acct-badge.warn{background:#fef4e6;color:#b45309;border:1px solid #fde3b0}
+  .acct-badge.err{background:#fdecec;color:#b91c1c;border:1px solid #fecaca}
+  .acct-badge.pause{background:#eef0ff;color:#4338ca;border:1px solid #c7d2fe}
+  .acct-badge.off{background:#f1f3f9;color:#6b7280;border:1px solid #e5e7eb}
+  .acct-actions{display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap}
+  .acct-actions .sm{padding:2px 8px;font-size:11px}
+  .acct-actions .sm.danger{color:var(--danger)}
+  .link-btn{background:none;border:none;color:var(--muted);font-size:10.5px;cursor:pointer;padding:0 2px}
+  .link-btn:hover{color:var(--primary);text-decoration:underline}
+  .acc-card.disabled{opacity:.65;border-style:dashed}
+  .acc-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .acc-tag-dyn{background:#eef0ff;color:#4338ca;font-size:10.5px;padding:1px 6px;border-radius:6px;font-weight:600}
+  .acc-tag-mount{background:#f1f3f9;color:#6b7280;font-size:10.5px;padding:1px 6px;border-radius:6px;font-weight:600}
+  .acc-status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+  .acc-status-ready{background:var(--ok)}
+  .acc-status-warn{background:var(--warn)}
+  .acc-status-err{background:var(--danger)}
+  .acc-status-off{background:var(--muted)}
+  .acc-meta{font-size:11.5px;color:var(--muted);margin:6px 0 8px;line-height:1.5}
+  .acc-actions{display:flex;gap:6px;flex-wrap:wrap}
+  /* 凭据逐行布局：左标签 / 中值 / 右操作位。标签按内容定宽不换行，值占剩余宽度并可断行，
+     所以窄屏（400px）下也只会把值折成多行，不出现横向滚动。 */
+  .key-row{display:grid;grid-template-columns:max-content minmax(0,1fr) auto;
+    align-items:baseline;gap:2px 8px;padding:4px 0;font-size:11.5px;line-height:1.6}
+  .key-row + .key-row{border-top:1px dashed var(--border)}
+  .key-row-label{color:var(--muted);white-space:nowrap}
+  .key-row-value{min-width:0;font-family:var(--mono);color:var(--text);word-break:break-all}
+  .key-row-name .key-row-value{font-family:inherit;font-size:13px;font-weight:600}
+  /* 操作位：现在一律为空，后续票据各自往自己那一行 append 按钮 */
+  .key-row-ops{display:flex;align-items:center;gap:4px;justify-self:end;min-width:0}
+  /* 凭据默认脱敏；只有点开「显示」后才换成明文，并允许长 Key 换行不撑破卡片 */
+  .key-token{word-break:break-all}
+  .key-token.revealed{color:var(--text);background:var(--primary-weak);border-radius:4px;padding:0 3px}
+  .key-row-value .btn-eye{margin-left:6px;padding:1px 7px;font-size:11px;line-height:1.5;font-family:inherit;white-space:nowrap}
+  /* 地址口径提示：只在本机打开而监听在别处时出现，跨在值列下方，窄屏跟着值一起折行 */
+  .key-row-hint{grid-column:2 / -1;color:var(--muted);font-size:11px;line-height:1.5;word-break:break-all}
+  .key-card-actions{display:flex;gap:6px;margin-top:8px}
+  /* 接入配置复制：格式下拉与可折叠预览。新增一档格式只改脚本里的格式表，这里不用动。 */
+  .key-cfg-wrap{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+  .key-cfg-select{border:1px solid var(--border);border-radius:8px;padding:3px 6px;
+    font-family:inherit;font-size:12px;background:var(--surface);color:var(--text)}
+  .key-cfg-hint{font-size:11px;color:var(--muted)}
+  .key-cfg-preview{flex:0 0 100%;margin:2px 0 0;padding:8px 10px;background:var(--panel);
+    border:1px solid var(--border);border-radius:8px;font-family:var(--mono);font-size:11px;
+    line-height:1.55;color:var(--text);white-space:pre-wrap;word-break:break-all;
+    max-height:240px;overflow:auto}
+  .key-cfg-preview[hidden]{display:none}
+  .badge.active{background:#e8f7ee;color:#15803d;border:1px solid #bbf7d0}
+  .badge.revoked{background:#fdecec;color:#b91c1c;border:1px solid #fecaca}
+  .badge.policy{background:#eef0ff;color:#4338ca;border:1px solid #c7d2fe}
+
+  /* 日志表 */
+  .log-table{width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono)}
+  .log-table th{text-align:left;font-weight:600;color:var(--muted);font-size:11px;letter-spacing:.04em;
+    padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+  .log-table td{padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap;color:#3f4254}
+  .log-table tr:last-child td{border-bottom:0}
+  /* 窄屏横向滚动时，时间列钉在左边，滚动后仍能定位每条记录 */
+  .log-table th:first-child,.log-table td:first-child{position:sticky;left:0;background:var(--surface);z-index:1}
+  .log-ok{color:#15803d}
+  .log-err{color:#b91c1c;font-weight:650}
+  /* 日志筛选栏：账号 / 模型 / 结果 / 关键字 / 时间范围 */
+  .log-filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0}
+  .log-filters input,.log-filters select{border:1px solid var(--border);border-radius:8px;padding:5px 8px;
+    font:inherit;font-size:12.5px;background:var(--surface);color:var(--text)}
+  .log-filters input{width:130px}
+  .log-filters #logFilterQ{width:210px}
+  .log-filters #logFilterFrom,.log-filters #logFilterTo{width:178px;font-family:var(--mono);font-size:12px}
+  .log-filters .log-range{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
+  /* 归档占用：和筛选控件同一行，放不下时自然换行 */
+  .log-archive{font-size:12px;color:var(--muted);font-family:var(--mono);margin-left:auto}
+  .log-archive.warn{color:var(--danger)}
+
+  @media (max-width:760px){
+    .app{flex-direction:column;height:auto;min-height:100vh}
+    .tabs{width:auto;flex:0 0 auto;flex-direction:row;gap:4px;overflow-x:auto;padding:8px 10px;
+      border-right:0;border-bottom:1px solid var(--border)}
+    .tabs .brand{display:none}
+    .tabs-foot{display:none}
+    .tab{width:auto;flex:0 0 auto;padding:7px 10px;font-size:12.5px}
+    .body{min-height:0}
+    header{height:auto;min-height:52px;flex-wrap:wrap;padding:6px 10px}
+    header .spacer{display:none}
+    #modelChip{max-width:150px;overflow:hidden;white-space:nowrap}
+    .pane{padding:12px 10px 18px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="tabs" id="tabNav" aria-label="主导航">
+    <div class="brand"><div class="logo">Ai</div><span>AiWork 网关</span></div>
+    <button class="tab on" data-tab="chat" type="button"><span class="ic">💬</span>对话</button>
+    <button class="tab" data-tab="accounts" type="button"><span class="ic">🗄</span>账号池</button>
+    <button class="tab" data-tab="usage" type="button"><span class="ic">📊</span>用量</button>
+    <button class="tab" data-tab="models" type="button"><span class="ic">🧩</span>模型</button>
+    <button class="tab" data-tab="settings" type="button"><span class="ic">⚙</span>设置</button>
+    <button class="tab" data-tab="logs" type="button"><span class="ic">📜</span>日志</button>
+    <div class="tabs-foot"><span class="dot" id="connDot"></span><span id="connText">连接中…</span></div>
+  </nav>
+
+  <div class="body">
+  <header>
+    <div class="chip" id="modelChip" title="切换到模型页">模型：—</div>
+    <div class="spacer"></div>
+    <button class="primary" id="btnSend">发送</button>
+  </header>
+
+  <!-- ========== 运维仪表盘：首屏常驻，不需要展开任何浮层 ========== -->
+  <section class="dash" id="dashboard" aria-label="运维仪表盘">
+    <div class="dash-head">
+      <div>
+        <h2>运维仪表盘</h2>
+        <div class="dash-sub" id="dashUpdated">正在读取…</div>
+      </div>
+      <div class="dash-actions">
+        <button class="sm" id="btnDashRefresh" title="立即刷新仪表盘">刷新</button>
+        <button class="primary sm" id="btnDashAdmin">配置账号池</button>
+        <button class="sm" id="btnDashKey">新增凭据</button>
+      </div>
+    </div>
+    <div class="dash-grid">
+      <div class="dash-card">
+        <h3>账号池 <span class="pill" id="dashPoolBadge">—</span></h3>
+        <div class="dash-kpi" id="dashPoolReady">—<small> ready</small></div>
+        <div class="dash-kpi-sub" id="dashPoolSub">正在读取账号…</div>
+        <div class="dash-list" id="dashPoolList"></div>
+      </div>
+
+      <div class="dash-card">
+        <h3>积分 <span class="pill" id="dashCreditsPlan">—</span></h3>
+        <div class="dash-kpi-pair">
+          <div class="dash-kpi avail" id="dashCreditsAvail">—<small> 可用</small></div>
+          <div class="dash-kpi" id="dashCreditsUsed">—<small> 已用</small></div>
+        </div>
+        <div class="dash-kpi-sub" id="dashCreditsSub">读取中…</div>
+        <div class="dash-row"><span>可用 / 总额</span><b id="dashCreditsTotal">—</b></div>
+        <div class="dash-progress" id="dashCreditsProg"><i style="width:0"></i></div>
+        <div class="dash-note" id="dashCreditsNote"></div>
+        <div class="dash-credits-accts" id="dashCreditsAccts" hidden>
+          <div class="dash-credits-hd">按账号</div>
+          <div class="dash-credits-list" id="dashCreditsAcctList"></div>
+        </div>
+        <div class="dash-note" id="dashCreditsGap" hidden></div>
+        <div class="row-btns" id="dashReauthRow" style="display:none">
+          <button class="sm" id="btnDashReauth">重新授权</button>
+        </div>
+      </div>
+
+      <div class="dash-card">
+        <h3>模型 / 成本 <span class="pill" id="dashModelRatio">—</span></h3>
+        <select class="dash-select" id="dashModelSelect" aria-label="切换模型"></select>
+        <div class="dash-model-meta" id="dashModelMeta">选择模型后显示倍率与上下文</div>
+        <div class="dash-chart" id="dashModelChartWrap"><canvas id="dashModelChart" aria-label="按模型的 token 使用量"></canvas></div>
+        <div class="dash-note">倍率优先取 Router 返回的真实值；读不到时标注「本地」，表示那是本地配置的占位值。</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="main">
+    <section class="view on chat" data-view="chat">
+      <div class="msgs" id="msgs">
+        <div class="empty" id="empty">
+          <div style="font-size:40px">💬</div>
+          <h2>开始对话</h2>
+          <div>在右侧选择模型，输入问题即可；支持流式输出。</div>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="composer-inner">
+          <textarea id="input" rows="3" placeholder="输入消息，Enter 发送 / Shift+Enter 换行…"></textarea>
+          <div class="composer-bar">
+            <div class="hint">Enter 发送 · Shift+Enter 换行</div>
+            <button class="sm" id="btnClear" type="button">清空会话</button>
+            <div class="tok-live" id="tokLive">约 0 tokens</div>
+            <button class="primary" id="btnSend2">发送</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 账号池：账号管理 + 凭据管理 + 用量明细 ========== -->
+    <section class="view" data-view="accounts">
+      <div class="pane">
+        <div class="pane-sec" id="adminSessionSection">
+          <h3>管理会话</h3>
+          <div class="note" id="adminSessionNote">需要管理口令才能修改账号与凭据</div>
+        </div>
+
+        <div class="pane-sec">
+          <h3>上游账号池</h3>
+          <p class="pane-desc">每个账号持有独立的 Router Key 与刷新令牌，网关按可用性调度；表格里的指标只统计本机实际转发的请求。</p>
+          <div class="row-btns table-toolbar">
+            <button class="primary sm" id="btnShowAddAccount">+ 接入官方账号</button>
+            <button class="sm" id="btnRefreshCredits">刷新全部积分</button>
+            <button class="sm" id="btnClearCooldowns">清空全部冷却</button>
+            <button class="sm" id="btnRefreshAccounts">刷新</button>
+            <span class="note" id="accountsHint" style="margin-left:auto"></span>
+          </div>
+          <div id="adminAccountsContainer" class="table-wrap"></div>
+        </div>
+
+        <div class="pane-sec">
+          <h3>调用凭据</h3>
+          <p class="pane-desc">下发给客户端使用的 Key；可限定可用账号范围。</p>
+          <div class="row-btns" style="margin-bottom:10px">
+            <button class="primary sm" id="btnShowCreateKey">+ 新增凭据</button>
+            <button class="sm" id="btnRefreshKeys">刷新</button>
+          </div>
+          <div id="createKeyBox" style="display:none;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px">
+            <div style="font-weight:600;font-size:13px;margin-bottom:6px">新建调用凭据</div>
+            <div class="field"><label>展示名称</label><input id="newKeyName" placeholder="如: Codex Desktop" style="flex:1" /></div>
+            <div class="field"><label>Token (留空随机生成)</label><input id="newKeyToken" placeholder="sk-..." style="flex:1" /></div>
+            <div style="font-size:12px;color:var(--muted);margin:6px 0 2px">账号范围策略</div>
+            <label class="chk" style="margin:4px 0"><input type="radio" name="newKeyPolicy" value="all" checked /> 全部账号 (跟随账号池变化)</label>
+            <label class="chk" style="margin:4px 0"><input type="radio" name="newKeyPolicy" value="explicit" /> 指定账号集合</label>
+            <input id="newKeyAccounts" placeholder="账号标识，逗号隔开 (如 acc1, acc2)" style="width:100%;border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:12px;margin-top:4px;display:none" />
+            <div class="row-btns" style="margin-top:10px">
+              <button class="primary sm" id="btnDoCreateKey">确认新增</button>
+              <button class="sm" id="btnCancelCreateKey">取消</button>
+            </div>
+            <div class="gate-err" id="createKeyErr"></div>
+          </div>
+          <div id="adminKeysContainer" class="sesslist" style="max-height:none"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 用量：时间范围 → KPI / 趋势 / 三张分组表 + 本机最近会话 ========== -->
+    <section class="view" data-view="usage">
+      <div class="pane">
+        <div class="pane-sec">
+          <div class="usage-head">
+            <div>
+              <h3>用量分析 <span class="pill" id="usageRangeBadge">近 7 天</span></h3>
+              <p class="pane-desc">来自本机用量账本，按时间片分桶后聚合；与顶部积分卡（上游权威值）是两套口径。</p>
+            </div>
+          </div>
+          <div class="usage-range" id="usageRange" role="group" aria-label="时间范围">
+            <button class="sm usage-toggle" data-range="today" type="button">今天</button>
+            <button class="sm usage-toggle on" data-range="7d" type="button">近 7 天</button>
+            <button class="sm usage-toggle" data-range="30d" type="button">近 30 天</button>
+            <button class="sm usage-toggle" data-range="custom" type="button">自定义</button>
+            <span class="usage-custom" id="usageCustom">
+              <input type="date" id="usageFrom" aria-label="开始日期" />
+              <span>至</span>
+              <input type="date" id="usageTo" aria-label="结束日期" />
+              <button class="sm" id="btnUsageApply" type="button">应用</button>
+            </span>
+            <button class="sm" id="btnUsageRefresh" type="button" title="重新读取用量">刷新</button>
+          </div>
+          <div class="usage-filter" id="usageAccountFilter">
+            <span>只看账号：<strong id="usageAccountFilterName">—</strong></span>
+            <button class="sm ghost" id="btnUsageClearAccount" type="button">清除过滤</button>
+          </div>
+          <div class="note" id="usageMeta" style="padding-bottom:0">读取中…</div>
+        </div>
+
+        <div class="pane-sec">
+          <h3>总览</h3>
+          <div class="usage-kpi" id="usageKpi">
+            <div class="kpi"><div class="n" id="kpiRequests">—</div><div class="t">请求数</div></div>
+            <div class="kpi"><div class="n" id="kpiFailRate">—</div><div class="t">失败率</div></div>
+            <div class="kpi"><div class="n" id="kpiPrompt">—</div><div class="t">输入 token</div></div>
+            <div class="kpi"><div class="n" id="kpiCompletion">—</div><div class="t">输出 token</div></div>
+            <div class="kpi"><div class="n" id="kpiCacheHit">—</div><div class="t">缓存命中率</div></div>
+            <div class="kpi"><div class="n" id="kpiLatency">—</div><div class="t">平均延迟</div></div>
+            <div class="kpi"><div class="n" id="kpiTps">—</div><div class="t">平均吐字速率</div></div>
+            <div class="kpi"><div class="n" id="kpiCredits">—</div><div class="t">估算消耗 <span class="pill">估算</span></div></div>
+          </div>
+          <div class="note" id="usageEstimateNote">估算消耗按本机倍率折算（单位积分，统一六位小数），是估算，不是账单。账户的「已用」积分以顶部积分卡为准（那是上游权威值）。</div>
+          <div class="usage-empty" id="usageEmpty">这段时间没有用量记录。账本还是空的：发起一次对话后，这里会出现请求数、趋势与分组明细。</div>
+        </div>
+
+        <div class="pane-sec">
+          <div class="usage-head">
+            <div>
+              <h3>趋势</h3>
+              <p class="pane-desc">柱子按请求数画；失败请求标红。悬停任一根柱子，可看该时间片的请求、失败与 token。</p>
+            </div>
+            <div class="usage-range" id="usageGranularity" role="group" aria-label="趋势粒度">
+              <button class="sm usage-toggle on" data-gran="auto" type="button" aria-pressed="true">自动</button>
+              <button class="sm usage-toggle" data-gran="hour" type="button" aria-pressed="false">按小时</button>
+              <button class="sm usage-toggle" data-gran="day" type="button" aria-pressed="false">按天</button>
+            </div>
+          </div>
+          <div class="usage-chart-wrap">
+            <div class="usage-chart" id="usageChart" role="list" aria-label="请求趋势柱状图"></div>
+          </div>
+          <div class="usage-chart-legend">
+            <span id="usageChartFrom">—</span>
+            <span id="usageChartNote">暂无数据</span>
+            <span id="usageChartTo">—</span>
+          </div>
+        </div>
+
+        <div class="pane-sec">
+          <h3>按模型</h3>
+          <p class="pane-desc">同一模型走过多个倍率时，倍率列给出区间，估算消耗按每次请求各自的倍率累计。</p>
+          <div class="table-wrap">
+            <table class="usage-table" id="usageModelTable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="pane-sec">
+          <h3>按账号</h3>
+          <p class="pane-desc">请求最终落在哪个上游账号；失败的那次记在失败的账号上。</p>
+          <div class="table-wrap">
+            <table class="usage-table" id="usageAccountTable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="pane-sec">
+          <h3>按凭据</h3>
+          <p class="pane-desc">按调用凭据（下发给客户端的 Key）分组，便于看是谁在用。</p>
+          <div class="table-wrap">
+            <table class="usage-table" id="usageKeyTable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="pane-sec">
+          <h3>最近会话 <span class="pill" id="sessCount" style="display:none">0</span></h3>
+          <p class="pane-desc">来自本机 usage-state 的会话记录，可被「重置本地统计」清空；与上面的账本统计相互独立。</p>
+          <div class="sesslist" id="sessions"></div>
+          <div class="note" id="sessNote">还没有会话记录</div>
+          <div class="row-btns" style="margin-top:8px">
+            <button class="sm" id="btnReset" type="button">重置本地统计</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 模型：选择 + 倍率 ========== -->
+    <section class="view" data-view="models">
+      <div class="pane">
+        <div class="pane-sec">
+          <h3>模型选择</h3>
+          <p class="pane-desc">点选即切换对话模型；倍率优先取 Router 真实值，读不到时标注「本地」。</p>
+          <div class="models" id="modelList"><div class="note">加载中…</div></div>
+        </div>
+        <div class="pane-sec">
+          <div class="note" id="modelNote">倍率（如 0.2x）优先取 AiWork Router 返回的真实值；标注「本地」的是本地配置占位值，不是计费依据。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 设置：账号池与流量治理 / 上游与高级 ========== -->
+    <section class="view" data-view="settings">
+      <div class="pane">
+        <div class="pane-sec">
+          <h3>账号调度</h3>
+          <p class="pane-desc">决定请求落到哪个账号，以及同一段对话会不会留在同一个账号上。保存后立即生效，已经在途的请求不受影响。</p>
+          <div class="set-item">
+            <div class="field"><label for="setMaxConcurrency">单账号最大在途并发</label><input id="setMaxConcurrency" type="number" min="1" max="1000" step="1" style="flex:1" /></div>
+            <p class="set-desc">一个账号同时最多处理几个请求，满了新的请求会换到别的账号。</p>
+          </div>
+          <div class="set-item">
+            <div class="field"><label for="setSessionBinding">会话粘性路由</label><input id="setSessionBinding" type="checkbox" /></div>
+            <p class="set-desc">开启后同一段对话尽量固定在一个账号上，避免多轮问答跳号。</p>
+          </div>
+          <div class="set-item">
+            <div class="field"><label for="setSessionTtl">会话粘性 TTL</label><input id="setSessionTtl" type="number" min="60" max="86400" step="1" style="flex:1" /><span class="set-unit">s</span></div>
+            <p class="set-desc">这个固定关系保留多久，超时后下一次请求会重新挑账号。</p>
+          </div>
+        </div>
+
+        <div class="pane-sec">
+          <h3>超时</h3>
+          <p class="pane-desc">上游迟迟不回话时，等多久放弃并换号重试。保存后立即生效，已经在途的请求不受影响。</p>
+          <div class="set-item">
+            <div class="field"><label for="setShortTimeout">短请求超时</label><input id="setShortTimeout" type="number" min="5" max="900" step="1" style="flex:1" /><span class="set-unit">s</span></div>
+            <p class="set-desc">一次普通请求最多等多久，超时就换号重试。</p>
+          </div>
+          <div class="set-item">
+            <div class="field"><label for="setFirstByte">聊天首字节超时</label><input id="setFirstByte" type="number" min="5" max="900" step="1" style="flex:1" /><span class="set-unit">s</span></div>
+            <p class="set-desc">请求发出后，上游多久没有回应就放弃这次尝试。</p>
+          </div>
+          <div class="set-item">
+            <div class="field"><label for="setStreamIdle">流空闲超时</label><input id="setStreamIdle" type="number" min="5" max="1800" step="1" style="flex:1" /><span class="set-unit">s</span></div>
+            <p class="set-desc">流式输出中途停顿多久算卡死，超时会中断这次尝试。</p>
+          </div>
+        </div>
+
+        <div class="pane-sec">
+          <h3>网络与日志</h3>
+          <p class="pane-desc">网关监听在哪个地址、对外发出什么请求标识。大多数情况下保持默认即可。</p>
+          <div class="set-item">
+            <div class="field"><label for="setBindAddress">监听 IP</label><input id="setBindAddress" type="text" maxlength="253" placeholder="0.0.0.0" style="flex:1" /></div>
+            <p class="set-desc">填 127.0.0.1 只有本机能访问，填 0.0.0.0 允许局域网访问。这里只填 IP，端口在下面两行。</p>
+          </div>
+          <div class="set-item">
+            <div class="field"><label for="setListenPort">容器内端口</label><input id="setListenPort" type="number" min="1" max="65535" step="1" style="flex:1" /></div>
+            <p class="set-desc">网关在容器里监听的端口，保存后立即换绑，已经在途的请求不会被打断。</p>
+          </div>
+          <div class="set-item">
+            <div class="field"><label for="setHostPort">容器外端口</label><input id="setHostPort" type="number" min="1" max="65535" step="1" style="flex:1" /><button class="sm" id="btnCopyPortCmd" type="button">复制命令</button></div>
+            <p class="set-desc" id="hostPortNote">宿主机上访问用的端口，由 compose 的端口映射决定，本页改不了。</p>
+            <p class="set-desc">在宿主机执行：<code id="portCmd"></code></p>
+            <p class="set-desc" id="bindEffective">当前生效：读取中…</p>
+          </div>
+          <div class="set-item">
+            <div class="field"><label for="setUserAgent">出站 User-Agent</label><input id="setUserAgent" type="text" maxlength="200" placeholder="aiwork-gateway/1.0" style="flex:1" /></div>
+            <p class="set-desc">网关发给上游的客户端标识，一般不用改。</p>
+          </div>
+          <div class="set-item">
+            <div class="field"><label for="setLogRetention">请求日志保留天数</label><input id="setLogRetention" type="number" min="1" max="365" step="1" style="flex:1" /><span class="set-unit">d</span></div>
+            <p class="set-desc">归档文件保留多少天，更早的会自动删掉。</p>
+          </div>
+          <div class="set-item">
+            <div class="field"><label for="setLogMaxMb">请求日志容量上限</label><input id="setLogMaxMb" type="number" min="10" max="5000" step="1" style="flex:1" /><span class="set-unit">MB</span></div>
+            <p class="set-desc">归档文件最多占多少空间，超出时从最旧的开始删。</p>
+          </div>
+          <div class="set-item">
+            <div class="field"><label for="setLogCaptureSource">记录来源 IP 与浏览器标识</label><input id="setLogCaptureSource" type="checkbox" /></div>
+            <p class="set-desc">开启后每条记录会带上来源 IP 和浏览器标识，方便查是谁在调用。</p>
+          </div>
+        </div>
+
+        <div class="row-btns" style="margin-bottom:14px">
+          <button class="primary" id="btnSaveSettings">保存设置</button>
+          <span class="note" id="settingsMsg" style="padding:0"></span>
+        </div>
+
+        <div class="pane-sec">
+          <h3>模型回落</h3>
+          <p class="pane-desc">首选模型不可用时，自动回落到这里指定的模型。</p>
+          <div class="field">
+            <label>回落到</label>
+            <select id="fallbackSel"><option value="">自动（默认）</option></select>
+          </div>
+          <div class="note" id="fallbackNote" style="margin-top:6px">读取中…</div>
+          <div class="row-btns" style="margin-top:8px">
+            <button id="btnSaveFallback">保存</button>
+          </div>
+        </div>
+
+        <div class="pane-sec" id="adminPwdSection" style="display:none">
+          <h3>管理口令</h3>
+          <p class="pane-desc">已启用管理口令：管理操作需要额外校验。清空环境变量 ADMIN_PASSWORD 即可关闭。</p>
+          <div class="field"><label>新管理口令</label><input id="newAdminPwd" type="password" placeholder="至少4位" style="flex:1" /></div>
+          <div class="row-btns" style="margin-top:8px">
+            <button id="btnSaveAdminPwd">保存新口令</button>
+            <button class="sm" id="btnAdminLogout" title="退出管理会话">退出管理会话</button>
+          </div>
+          <div class="gate-err" id="adminPwdErr"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 日志：最近代理调用 ========== -->
+    <section class="view" data-view="logs">
+      <div class="pane">
+        <div class="pane-sec">
+          <div class="dash-head" style="margin-bottom:8px">
+            <div>
+              <h3 style="margin:0">请求日志</h3>
+              <div class="pane-desc" id="logMeta" style="margin:4px 0 0">最近 50 条代理调用（/v1/*），只记录元数据</div>
+            </div>
+            <div class="row-btns" style="margin:0">
+              <label class="chk" style="margin:0"><input type="checkbox" id="logAuto" checked /> 自动刷新</label>
+              <button class="sm" id="btnLogRefresh">刷新</button>
+            </div>
+          </div>
+          <div class="log-filters">
+            <input type="text" id="logFilterAccount" placeholder="账号" aria-label="按账号筛选" autocomplete="off" />
+            <input type="text" id="logFilterModel" placeholder="模型" aria-label="按模型筛选" autocomplete="off" />
+            <select id="logFilterOutcome" aria-label="按结果筛选" title="结果">
+              <option value="">全部结果</option>
+              <option value="success">成功</option>
+              <option value="upstream_error">上游错误</option>
+              <option value="stream_error">流中断</option>
+              <option value="client_error">请求被拒</option>
+              <option value="client_abort">客户端中断</option>
+            </select>
+            <input type="text" id="logFilterQ" placeholder="关键字：路径 / 模型 / 错误" aria-label="关键字筛选" autocomplete="off" />
+            <label class="log-range">起 <input type="datetime-local" id="logFilterFrom" step="1" /></label>
+            <label class="log-range">止 <input type="datetime-local" id="logFilterTo" step="1" /></label>
+            <button class="sm" id="btnLogFilterApply">筛选</button>
+            <button class="sm ghost" id="btnLogClearFilters">清除条件</button>
+            <span class="log-archive" id="logArchive" title="JSONL 归档占用">归档状态读取中…</span>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="log-table">
+              <thead><tr><th>时间</th><th>账号</th><th>模型</th><th>结果</th><th>换号</th><th>token</th><th>耗时</th><th>状态</th><th>方法</th><th>路径</th><th>凭据</th><th>错误</th></tr></thead>
+              <tbody id="logRows"><tr><td colspan="12" class="note">加载中…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+  </div>
+</div>
+
+<!-- ========== 全局轻提示（常驻节点：live region 必须在内容变化前就存在才会播报） ========== -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- ========== 访问密钥闸门 ========== -->
+<div class="gate" id="keyGate">
+  <div class="gate-box">
+    <h3>输入访问密钥</h3>
+    <p>这个页面需要 API Key 才能使用。密钥只保存在你本地浏览器，不会回传服务器。</p>
+    <input id="gateInput" type="password" placeholder="sk-..." autocomplete="off" />
+    <button class="primary" id="gateBtn">进入</button>
+    <div class="gate-err" id="gateErr"></div>
+  </div>
+</div>
+
+<!-- ========== 管理登录弹窗 ========== -->
+<div class="gate" id="adminLoginGate">
+  <div class="gate-box">
+    <h3>管理员登录</h3>
+    <p>请输入部署时配置的管理口令。登录后可管理调用凭据及全局配置。</p>
+    <input id="adminPwdInput" type="password" placeholder="输入管理口令..." autocomplete="current-password" />
+    <button class="primary" id="adminLoginBtn">登录</button>
+    <div class="row-btns" style="margin-top:8px">
+      <button id="btnCancelAdminLogin">取消</button>
+    </div>
+    <div class="gate-err" id="adminLoginErr"></div>
+  </div>
+</div>
+
+<!-- ========== 接入官方上游账号弹窗 ========== -->
+<div class="gate" id="modalAddAccount">
+  <div class="gate-box" style="max-width:420px">
+    <div class="p-head" style="margin-bottom:10px">
+      <strong>接入官方上游账号</strong>
+      <button class="ghost sm" id="btnCloseAddAccount">✕</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px">
+      <button class="sm on" id="tabDeviceLogin">官方扫码/网页登录</button>
+      <button class="sm ghost" id="tabManualImport">手动粘贴凭据</button>
+    </div>
+    <!-- Tab 1 内容：官方设备授权流 -->
+    <div id="paneDeviceLogin">
+      <div class="note" style="margin-bottom:8px">点击开始后，在已登录官方账号的浏览器或手机中完成授权，网关自动轮询并接入。</div>
+      <div class="field"><label>账号备注名</label><input id="devLoginAccName" placeholder="如: 个人主号 (可选)" style="flex:1" /></div>
+      <div id="devLoginActionBox" style="margin-top:10px">
+        <button class="primary sm" id="btnStartDeviceLogin">生成官方授权</button>
+      </div>
+      <div id="devLoginActiveBox" style="display:none;margin-top:12px;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">
+        <div style="font-size:12px;color:var(--muted)">授权验证码 (User Code)</div>
+        <div id="devUserCode" style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--primary);letter-spacing:2px;margin:4px 0 8px"></div>
+        <div style="margin-bottom:8px">
+          <a id="devLoginLink" href="#" target="_blank" style="display:inline-block;padding:7px 14px;background:var(--primary);color:#fff;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600">🔗 打开官方授权页确认</a>
+        </div>
+        <div id="devPollStatus" style="font-size:12px;color:var(--warn);margin-top:8px">⏳ 正在等待官方网页授权...</div>
+      </div>
+      <div class="gate-err" id="devLoginErr"></div>
+    </div>
+    <!-- Tab 2 内容：手动粘贴凭据 -->
+    <div id="paneManualImport" style="display:none">
+      <div class="field"><label>账号备注名</label><input id="importAccName" placeholder="如: 备用账号" style="flex:1" /></div>
+      <div class="field"><label>Router Key</label><input id="importRouterKey" type="password" placeholder="官方上游密钥 (aw-xxx 或 API Key)" style="flex:1" /></div>
+      <div class="field"><label>用户 UID</label><input id="importUserId" placeholder="可选用户唯一标识" style="flex:1" /></div>
+      <div class="row-btns" style="margin-top:12px">
+        <button class="primary sm" id="btnDoImportAccount">确认导入</button>
+        <button class="sm" id="btnCancelImportAccount">取消</button>
+      </div>
+      <div class="gate-err" id="importAccErr"></div>
+    </div>
+  </div>
+</div>
+
+<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.6.1/dist/chart.umd.min.js"
+  integrity="sha384-Emf5ZVIUiarAdhkgtqK+5/Z5qIvM6QoVrS+qAVtfyZVuD5lIHrac0me485+Antp0"
+  crossorigin="anonymous" referrerpolicy="no-referrer"
+  onerror="window.__chartLoadFailed=true"></script>
+<script>
+(function(){
+  // 移除自动注入：调用凭据由本地用户输入并存入 localStorage
+  let API_TOKEN = '';
+  try { API_TOKEN = localStorage.getItem('aw_api_key') || ''; } catch(e){}
+  const H = { 'Content-Type':'application/json' };
+  function setToken(t){
+    API_TOKEN = t || '';
+    if (API_TOKEN) H['Authorization'] = 'Bearer ' + API_TOKEN;
+    else delete H['Authorization'];
+  }
+  setToken(API_TOKEN);
+
+  let ADMIN_TOKEN = '';
+  try { ADMIN_TOKEN = localStorage.getItem('aw_admin_token') || ''; } catch(e){}
+  function getAdminHeaders(){
+    const h = { 'Content-Type': 'application/json' };
+    if (ADMIN_TOKEN) h['Authorization'] = 'Bearer ' + ADMIN_TOKEN;
+    else {
+      // ADR-0012：未启用管理口令时，管理权限随调用凭据授予，管理请求复用页面已保存的 API Key。
+      let k = '';
+      try { k = localStorage.getItem('aw_api_key') || ''; } catch(e){}
+      if (k) h['Authorization'] = 'Bearer ' + k;
+    }
+    return h;
+  }
+  function setAdminToken(t){
+    ADMIN_TOKEN = t || '';
+    try {
+      if (ADMIN_TOKEN) localStorage.setItem('aw_admin_token', ADMIN_TOKEN);
+      else localStorage.removeItem('aw_admin_token');
+    } catch(e){}
+  }
+
+  const $ = (id) => document.getElementById(id);
+  const state = { models: [], model: null, messages: [], streaming: false, dashboard: null, dashLoading: false, tab: 'chat', modelChart: null, usageChart: null, effectiveBind: null, effectivePort: null, usageRange: '7d', usageGran: 'auto', usageBusy: false, usageAccount: '', usageAccountLabel: '' };
+  let PENDING_ADD_ACCOUNT = false;
+  let PENDING_CREATE_KEY = false;
+
+  // ---- 格式化 ----
+  const fmt = (n) => (n||0).toLocaleString('zh-CN');
+  const money = (n) => '¥' + (n||0).toFixed(2);
+  const usd = (n) => '$' + (n||0).toFixed(2);
+  function ago(ts){
+    if (!ts) return '—';
+    const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (s < 60) return s + ' 秒前';
+    if (s < 3600) return Math.floor(s/60) + ' 分钟前';
+    if (s < 86400) return Math.floor(s/3600) + ' 小时前';
+    return Math.floor(s/86400) + ' 天前';
+  }
+  function hms(ts){
+    if (!ts) return '—';
+    const d = new Date(ts);
+    const p = (x)=>String(x).padStart(2,'0');
+    return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+  }
+
+  // 轻量提示：失败原因不能只留在 console/空 return 里，用户需要看得见。
+  // 节点常驻在 HTML 里（live region 必须先存在再改内容才会被读屏播报），
+  // 消息进队列逐条播放，避免两件事同时失败时后一条把前一条瞬间顶掉。
+  const TOAST_QUEUE = [];
+  let TOAST_BUSY = false;
+  function toast(msg){
+    if (!msg) return;
+    if (TOAST_QUEUE.length >= 3) TOAST_QUEUE.shift();
+    TOAST_QUEUE.push(String(msg));
+    if (!TOAST_BUSY) playToast();
+  }
+  function playToast(){
+    const el = $('toast');
+    if (!el) return;
+    const msg = TOAST_QUEUE.shift();
+    if (msg == null){ TOAST_BUSY = false; el.classList.remove('on'); return; }
+    TOAST_BUSY = true;
+    el.textContent = msg;
+    el.classList.add('on');
+    setTimeout(()=>{ el.classList.remove('on'); setTimeout(playToast, 180); }, 3500);
+  }
+
+  // ---- 复制与取值入口 ----
+  // 全页唯一的复制入口。返回 Promise<boolean>，调用方不用自己包 try/catch。
+  // 局域网 http 不是安全上下文，navigator.clipboard 直接是 undefined，
+  // 所以「优先用浏览器接口 + 失败/不存在时回落」两步都要在，不能只留前面那半截。
+  async function copyText(text){
+    const value = text == null ? '' : String(text);
+    const clip = window.isSecureContext ? navigator.clipboard : null;
+    if (clip && typeof clip.writeText === 'function'){
+      try{
+        await clip.writeText(value);
+        return true;
+      }catch(e){
+        // 权限被拒、文档失焦都会走到这里：继续往下试兜底，别在这里就报失败。
+      }
+    }
+    let ta = null;
+    try{
+      ta = document.createElement('textarea');
+      ta.value = value;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '0';
+      ta.style.left = '0';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus({ preventScroll: true });
+      ta.select();
+      ta.setSelectionRange(0, value.length);
+      // 局域网 http 下没有 navigator.clipboard，这条 textarea + execCommand 路径是
+      // 那种环境下唯一的复制方式。execCommand 虽被标为废弃，不要以「已废弃」为由删掉。
+      return typeof document.execCommand === 'function' && document.execCommand('copy') === true;
+    }catch(e){
+      return false;
+    }finally{
+      if (ta && ta.parentNode){
+        try{ ta.parentNode.removeChild(ta); }catch(e){}
+      }
+    }
+  }
+
+  // 按凭据 id 取一次明文 token：复用「按需查看」既有端点，不新增读得更宽的接口。
+  async function fetchKeyToken(keyId){
+    const r = await fetch(`/api/admin/keys/${encodeURIComponent(keyId)}/token`, {
+      headers: getAdminHeaders(),
+      cache: 'no-store',
+    });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j || !j.ok) throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+    return j.token;
+  }
+
+  // 按凭据 id 取它能调的模型（模型 id 数组）：以该凭据的明文 token 调 /v1/models，
+  // 由服务端按这个凭据的账号范围过滤。token 传了就直接用，没传才为这次读取现取一次明文
+  // ——一次复制接入配置只该取一次明文。
+  // 没有账号权限时服务端回 403，这里当作「没有可用模型」，
+  // 返回空数组；其它错误照常抛，别把网络故障说成「没有模型」。
+  async function fetchKeyModels(keyId, token){
+    const bearer = token || await fetchKeyToken(keyId);
+    const r = await fetch('/v1/models', {
+      headers: { 'Authorization': 'Bearer ' + bearer },
+      cache: 'no-store',
+    });
+    if (r.status === 403) return [];
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j) throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+    return (Array.isArray(j.data) ? j.data : []).map(m => m && m.id).filter(Boolean);
+  }
+
+  // ---- token 估算 ----
+  function estimateTokens(text){
+    if(!text) return 0;
+    let n = 0;
+    for (const ch of text){ n += (ch.charCodeAt(0) > 255 ? 1 : 0.25); }
+    return Math.ceil(n);
+  }
+
+  // 积分卡总额行：可用 / 总额 两个数（可用在前），缺一个时退化成一个数
+  function creditsTotalText(total, remain){
+    if (total == null) return '—';
+    return remain != null ? fmt(remain) + ' / ' + fmt(total) : fmt(total);
+  }
+
+  // 积分条按「可用占比」填充：绿条＝还能用多少；剩余见底才转黄/红
+  function creditsAvailPct(total, remain, used){
+    const t = dashNum(total);
+    if (!(t > 0)) return null;
+    const r = dashNum(remain);
+    if (r != null) return Math.max(0, Math.min(100, r / t * 100));
+    const u = dashNum(used);
+    if (u != null) return Math.max(0, Math.min(100, (t - u) / t * 100));
+    return null;
+  }
+
+  // 告警档：可用 ≤40% 黄、≤15% 红（等效「已用 ≥60% / ≥85%」）
+  function creditsBarClass(pct){
+    if (pct == null) return 'dash-progress';
+    return 'dash-progress' + (pct <= 15 ? ' danger' : pct <= 40 ? ' warn' : '');
+  }
+
+  // 逐账号积分分条：剩余 / 总额 + 可用占比条（绿条＝可用）；失败账号保留灰行并计入「未计入合计」
+  function paintCreditsAccounts(c, poolAccounts){
+    const wrap = $('dashCreditsAccts');
+    const box = $('dashCreditsAcctList');
+    const gap = $('dashCreditsGap');
+    box.textContent = '';
+    gap.hidden = true;
+    gap.textContent = '';
+    if (!c || !c.ok || !c.accounts || !Object.keys(c.accounts).length){
+      wrap.hidden = true;
+      return;
+    }
+    wrap.hidden = false;
+    const names = {};
+    (poolAccounts || []).forEach(a => {
+      // 有自定义名称就用名称，否则用完整账号 id（不截断，名称过长由 CSS 换行）
+      const named = a.name && a.name !== a.id ? a.name : '';
+      names[a.id] = named || String(a.id || '');
+    });
+    const rows = Object.keys(c.accounts).map(id => ({ id, a: c.accounts[id] }));
+    rows.sort((x, y) => {
+      const xo = !!(x.a && x.a.ok);
+      const yo = !!(y.a && y.a.ok);
+      if (xo !== yo) return xo ? -1 : 1;
+      if (!xo) return 0;
+      return (dashNum(y.a.total) || 0) - (dashNum(x.a.total) || 0);
+    });
+    let missed = 0;
+    for (const item of rows){
+      const id = item.id;
+      const a = item.a || {};
+      const ok = !!a.ok;
+      const row = document.createElement('div');
+      row.className = 'dash-ca' + (ok ? '' : ' bad');
+      row.dataset.accountId = id;
+      row.title = id + (ok && a.expire_at ? (' · 到期 ' + a.expire_at) : '');
+      const top = document.createElement('div');
+      top.className = 'dash-ca-top';
+      const nm = document.createElement('span');
+      nm.className = 'dash-ca-name';
+      nm.textContent = names[id] || (a.name && a.name !== id ? a.name : String(id));
+      const plan = document.createElement('span');
+      plan.className = 'dash-ca-plan';
+      const num = document.createElement('span');
+      num.className = 'dash-ca-num';
+      top.appendChild(nm);
+      if (ok){
+        plan.textContent = a.plan_name || '—';
+        const total = dashNum(a.total);
+        const remain = dashNum(a.all_remaining != null ? a.all_remaining : a.remaining);
+        const used = dashNum(a.used);
+        num.textContent = remain != null ? fmt(remain) : '—';
+        if (total != null){
+          const sep = document.createElement('i');
+          sep.textContent = ' / ' + fmt(total);
+          num.appendChild(sep);
+        }
+        const bar = document.createElement('div');
+        // 条表示「可用占比」：绿条越长＝还能用得越多，消耗到告警线时转黄/红（与上方总条同口径）
+        const pct = creditsAvailPct(total, remain, used);
+        bar.className = creditsBarClass(pct);
+        const fill = document.createElement('i');
+        fill.style.width = (pct == null ? 0 : pct) + '%';
+        bar.appendChild(fill);
+        top.appendChild(plan);
+        top.appendChild(num);
+        row.appendChild(top);
+        row.appendChild(bar);
+      } else {
+        missed++;
+        plan.textContent = '读取失败';
+        num.textContent = '—';
+        top.appendChild(plan);
+        top.appendChild(num);
+        const bar = document.createElement('div');
+        bar.className = 'dash-progress';
+        row.appendChild(top);
+        row.appendChild(bar);
+      }
+      box.appendChild(row);
+    }
+    if (missed > 0){
+      gap.hidden = false;
+      gap.textContent = missed + ' 个账号未计入上方合计（读取失败），点该行可在账号池单独刷新。';
+    }
+    box.onclick = (e) => {
+      const hit = e.target && e.target.closest ? e.target.closest('.dash-ca') : null;
+      if (!hit || !hit.dataset.accountId) return;
+      switchTab('accounts');
+      focusAccountRow(hit.dataset.accountId);
+    };
+  }
+
+  // 账号表异步加载：轮询到该行出现再高亮并滚入视野
+  function focusAccountRow(id){
+    const started = Date.now();
+    const sel = 'tr[data-account-id="' + String(id).replace(/["\\]/g, '\\$&') + '"]';
+    const tick = () => {
+      const row = document.querySelector(sel);
+      if (row){
+        row.classList.add('row-focus');
+        try { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) { row.scrollIntoView(); }
+        setTimeout(() => row.classList.remove('row-focus'), 2200);
+        return;
+      }
+      if (Date.now() - started < 4000) setTimeout(tick, 150);
+    };
+    setTimeout(tick, 200);
+  }
+
+  // ---- 左侧 TAB 导航（替代原「管理后台 / 用量 / 清空会话」三个浮层按钮） ----
+  const VIEWS = ['chat', 'accounts', 'usage', 'models', 'settings', 'logs'];
+
+  function switchTab(name, knownSession){
+    if (!VIEWS.includes(name)) name = 'chat';
+    state.tab = name;
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.dataset.view === name));
+    document.querySelectorAll('#tabNav .tab').forEach(b => b.classList.toggle('on', b.dataset.tab === name));
+    // 运维仪表盘只服务对话视图：切到账号池/用量/日志时让出整屏。
+    const dash = $('dashboard');
+    if (dash) dash.style.display = name === 'chat' ? '' : 'none';
+    // 隐藏期间 renderDashboardCharts 会跳过（宽度为 0）；切回对话时补画一次。
+    if (name === 'chat' && state.dashboard) renderDashboardCharts(state.dashboard);
+    if (name === 'accounts') ensureAdminThen((st) => { loadAdminAccounts(st); loadAdminKeys(); }, 'accounts', knownSession);
+    if (name === 'settings') ensureAdminThen((st) => { loadFallback(); loadSettings(st); }, 'settings', knownSession);
+    if (name === 'usage') { loadUsage(true); loadUsageBuckets(); }
+    if (name === 'models') loadModels();
+    if (name === 'logs') loadLogs();
+  }
+
+  // 管理相关 TAB 需要管理会话；没有就弹登录框，登录后停留在当前 TAB。
+  // 三种部署形态一次判清，避免每个调用点各自拼 checkAdminAuth + showAdminLogin
+  // （未配口令时那样会弹出必然返回 400 的口令框，ADR-0014 §6 修过一次，首屏按钮漏了）。
+  async function ensureAdminThen(fn, tabName, knownSession){
+    const st = knownSession || await getAdminSession();
+    if (st.authenticated) { fn(st); return true; }
+    if (st.configured) { showAdminLogin(tabName); return false; }
+    // 未启用管理口令：认证失败只可能是访问密钥缺失/失效，先补齐密钥再重试，
+    // 绝不弹一个「提交必然失败」的口令框。
+    await ensureKey();
+    const retry = await getAdminSession();
+    if (retry.authenticated) { fn(retry); return true; }
+    // 补齐密钥后仍然不是管理会话：可能是这把 Key 已被吊销，必须说出来，
+    // 否则用户只会看到一块空白面板。
+    toast('当前访问密钥没有管理权限（可能已被吊销）；请在「账号池」中检查凭据，或重新输入有效密钥。');
+    return false;
+  }
+
+  // TAB 布局下不再有浮层，保留空实现兼容旧调用点
+  function closePanels(){}
+
+  // ---- models (安全 DOM 构建，绝不使用 innerHTML 拼接) ----
+  // 两个接口给的字段名不一样：/api/models 是驼峰（ratioReal / costTag），
+  // /api/dashboard 是下划线（ratio_real / cost_tag）。在入口处归一化一次，
+  // 渲染代码就不用到处写 `a || b` 两套兜底（否则总有一条分支会漏）。
+  function modelView(m){
+    if (!m) return null;
+    const multiplier = (typeof m.multiplier === 'number') ? m.multiplier : null;
+    return {
+      id: m.id,
+      name: m.name || m.id,
+      ratio: m.ratio || '',
+      ratioReal: m.ratioReal === true || m.ratio_real === true,
+      multiplier,
+      contextWindow: m.context_window || m.contextWindow || null,
+      costTag: m.costTag || m.cost_tag || '',
+      reasoning: !!m.reasoning,
+    };
+  }
+
+  // 倍率文案的唯一来源：仪表盘徽标与模型卡片都调这里，避免两处说法不一致。
+  // 三种状态要分清：真实倍率 / 本地占位倍率 / 连占位值都没有（不能显示成「1x 本地」）。
+  function ratioLabel(m){
+    const hasRatio = Boolean(m.ratio);
+    if (!hasRatio && !m.ratioReal) return { text: '—', real: false, shown: '倍率未知' };
+    const text = hasRatio ? m.ratio : (m.multiplier != null ? m.multiplier + 'x' : '—');
+    return { text, real: m.ratioReal, shown: m.ratioReal ? text : text + ' 本地' };
+  }
+
+  async function loadModels(){
+    try{
+      const r = await fetch('/api/models', { headers: H });
+      const j = await r.json();
+      state.models = (j.data || []).map(modelView);
+      renderModels();
+      if (state.models.length && !state.model) selectModel(state.models[0].id);
+      if (j.real && !j.real.ok) $('modelNote').textContent = '真实倍率读取失败：' + (j.real.error||'未知') + '（标「本地」的是本地配置的占位值，不是计费依据）';
+    }catch(e){
+      const box = $('modelList');
+      box.textContent = '';
+      const n = document.createElement('div');
+      n.className = 'note';
+      n.textContent = '模型加载失败';
+      box.appendChild(n);
+    }
+  }
+
+  function renderModels(){
+    const box = $('modelList');
+    box.textContent = '';
+    if (!state.models.length){
+      const n = document.createElement('div');
+      n.className = 'note';
+      n.textContent = '无模型';
+      box.appendChild(n);
+      return;
+    }
+    state.models.forEach(m => {
+      const card = document.createElement('div');
+      card.className = 'model-card' + (state.model === m.id ? ' active' : '');
+      card.dataset.id = m.id;
+
+      const nm = document.createElement('div');
+      nm.className = 'nm';
+      const nmText = document.createTextNode((m.name || m.id) + ' ');
+      nm.appendChild(nmText);
+
+      const mult = m.multiplier;
+      let cls = 'cost-mid';
+      if (mult != null && mult <= 0.3) cls = 'cost-low';
+      else if (mult != null && mult >= 1.2) cls = 'cost-high';
+
+      const label = ratioLabel(m);
+      const costTag = document.createElement('span');
+      costTag.className = 'tag ' + cls;
+      costTag.title = label.real
+        ? '来自上游 /v1/models 的真实计费倍率'
+        : (label.text === '—' ? '无倍率信息（上游未返回，本地也没有配置）' : '上游倍率未取到，这是本地配置的占位值，不是计费依据');
+      costTag.textContent = label.shown;
+      nm.appendChild(costTag);
+
+      if (m.costTag && m.costTag !== label.text) {
+        const extra = document.createElement('span');
+        extra.className = 'tag ' + cls;
+        extra.textContent = m.costTag;
+        nm.appendChild(extra);
+      }
+
+      if (m.reasoning) {
+        const reasonTag = document.createElement('span');
+        reasonTag.className = 'tag reason';
+        reasonTag.textContent = '推理';
+        nm.appendChild(reasonTag);
+      }
+
+      const idDiv = document.createElement('div');
+      idDiv.className = 'id';
+      idDiv.textContent = m.id + (m.contextWindow ? ' · ' + Math.round(m.contextWindow/1024) + 'k ctx' : '');
+
+      card.appendChild(nm);
+      card.appendChild(idDiv);
+      card.addEventListener('click', () => selectModel(m.id));
+      box.appendChild(card);
+    });
+  }
+
+  function selectModel(id){
+    state.model = id;
+    const m = state.models.find(x=>x.id===id);
+    $('modelChip').textContent = '模型：' + ((m&&m.name)||id);
+    renderModels();
+    syncDashModel(id);
+  }
+
+  // ---- 请求日志（日志 TAB） ----
+  let logTimer = null;
+
+  const LOG_FILTER_INPUTS = ['logFilterAccount', 'logFilterModel', 'logFilterQ', 'logFilterFrom', 'logFilterTo'];
+
+  // 结果标签只维护一处：筛选下拉就是唯一来源，表格不再抄一份。
+  function outcomeLabels(){
+    const sel = $('logFilterOutcome');
+    const out = {};
+    if (sel) for (const o of sel.options) if (o.value) out[o.value] = o.textContent;
+    return out;
+  }
+
+  // datetime-local 给的是「本地时间、无时区」，直接发会被服务端按它的时区解释（容器多为 UTC）。
+  // 统一转成带时区的 ISO 再发。
+  function localInputToIso(v){
+    if (!v) return '';
+    const d = new Date(v);
+    return Number.isFinite(d.getTime()) ? d.toISOString() : '';
+  }
+
+  function logFilterValues(){
+    const get = (id) => { const el = $(id); return el ? el.value.trim() : ''; };
+    return {
+      account: get('logFilterAccount'),
+      model: get('logFilterModel'),
+      outcome: get('logFilterOutcome'),
+      q: get('logFilterQ'),
+      from: localInputToIso(get('logFilterFrom')),
+      to: localInputToIso(get('logFilterTo')),
+    };
+  }
+
+  function hasLogFilters(f){
+    return Object.keys(f).some((k) => f[k] !== '');
+  }
+
+  // 日志表的列只在这里定义一次：表头（静态 HTML）与每行单元格都按这份顺序排，
+  // 空态/失败态的 colSpan 由列数推导。调整列序时不会再出现「表头 12 列、数据 10 格」的静默错位。
+  // cell(e, ctx) 返回 { text, cls?, title? }，列语义各自独立，不靠格子下标互相猜。
+  function logErrorSummary(v){
+    const raw = (v === null || v === undefined ? '' : String(v)).replace(/\s+/g, ' ').trim();
+    if (!raw) return '';
+    return raw.length > 40 ? raw.slice(0, 40) + '…' : raw;
+  }
+
+  const LOG_COLUMNS = [
+    { key: 'time', label: '时间',
+      cell: (e) => ({ text: new Date(e.t).toLocaleTimeString('zh-CN', { hour12: false }) }) },
+    { key: 'account', label: '账号',
+      cell: (e) => ({ text: e.account ? (e.account.name || '') + (e.account.short ? ' · ' + e.account.short : '') : '—' }) },
+    { key: 'model', label: '模型', cell: (e) => ({ text: e.model || '—' }) },
+    { key: 'outcome', label: '结果',
+      cell: (e, ctx) => ({ text: ctx.outcome(e.outcome), cls: e.outcome === 'success' ? 'log-ok' : 'log-err' }) },
+    // 票 03：换号次数与错误摘要各自成列，不再塞进「结果」的文字后缀与悬停提示里。
+    { key: 'attempts', label: '换号',
+      cell: (e) => ({ text: String(Number(e.attempts) > 0 ? Number(e.attempts) : 0) }) },
+    { key: 'tokens', label: 'token',
+      cell: (e) => ({ text: e.total_tokens != null
+        ? e.total_tokens + ' (' + (e.prompt_tokens != null ? e.prompt_tokens : '?') + '/' + (e.completion_tokens != null ? e.completion_tokens : '?') + ')'
+        : '—' }) },
+    { key: 'ms', label: '耗时', cell: (e) => ({ text: e.ms != null ? e.ms + ' ms' : '—' }) },
+    { key: 'status', label: '状态',
+      cell: (e) => ({ text: String(e.status != null ? e.status : ''),
+        cls: Number(e.status) >= 400 ? 'log-err' : 'log-ok' }) },
+    { key: 'method', label: '方法', cell: (e) => ({ text: e.method || '' }) },
+    { key: 'path', label: '路径', cell: (e) => ({ text: e.path || '' }) },
+    { key: 'key', label: '凭据', cell: (e) => ({ text: e.key || '—' }) },
+    { key: 'error', label: '错误',
+      cell: (e) => {
+        const summary = logErrorSummary(e.error);
+        return { text: summary || '—', title: summary ? String(e.error) : '' };
+      } },
+  ];
+
+  async function loadLogs(){
+    const filters = logFilterValues();
+    const p = new URLSearchParams({ limit: '50' });
+    for (const [k, v] of Object.entries(filters)) if (v) p.set(k, v);
+    try{
+      const r = await fetch('/api/logs?' + p.toString(), { headers: H, cache: 'no-store' });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) throw new Error((data && data.error && data.error.message) || ('HTTP ' + r.status));
+      renderLogs(data, hasLogFilters(filters));
+    }catch(e){
+      const tb = $('logRows');
+      tb.textContent = '';
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = LOG_COLUMNS.length; td.className = 'note';
+      td.textContent = '日志读取失败：' + e.message;
+      tr.appendChild(td); tb.appendChild(tr);
+    }
+    scheduleLogPoll();
+  }
+
+  function scheduleLogPoll(){
+    if (logTimer) { clearInterval(logTimer); logTimer = null; }
+    if (state.tab !== 'logs') return;
+    if ($('logAuto') && !$('logAuto').checked) return;
+    logTimer = setInterval(()=>{ if (!document.hidden) loadLogs(); }, 5000);
+  }
+
+  function renderLogs(j, filtered){
+    const tb = $('logRows');
+    tb.textContent = '';
+    const entries = (j && j.entries) || [];
+    const OUTCOME = outcomeLabels();
+    const ctx = { outcome: (o) => OUTCOME[o] || o || '—' };
+    if (!entries.length){
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = LOG_COLUMNS.length; td.className = 'note';
+      td.textContent = filtered ? '没有匹配的日志记录，试试放宽条件或清除条件' : '还没有代理调用记录';
+      tr.appendChild(td); tb.appendChild(tr);
+    } else {
+      for (const e of entries){
+        const tr = document.createElement('tr');
+        for (const col of LOG_COLUMNS){
+          const spec = col.cell(e, ctx) || {};
+          const td = document.createElement('td');
+          td.textContent = spec.text;
+          if (spec.cls) td.className = spec.cls;
+          if (spec.title) td.title = spec.title;
+          tr.appendChild(td);
+        }
+        tb.appendChild(tr);
+      }
+    }
+    // 从用量页「按账号」跳过来时，输入框里已经有账号；这里再在元信息里点明一次，
+    // 免得用户只看到「命中 N 条」却不知道自己在筛选。
+    const accScope = logFilterValues().account;
+    $('logMeta').textContent = (accScope ? '按账号筛选：' + accScope + ' · ' : '')
+      + '命中 ' + (j.matched != null ? j.matched : entries.length) + ' 条 · 缓冲 '
+      + (j.total != null ? j.total : entries.length) + ' 条 · 容量 ' + (j.capacity || 0)
+      + ' · 更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    renderArchiveState(j && j.archive);
+  }
+
+  // 归档状态：关闭、不可写、空、正常四种状态都要说清楚，留空会让用户以为功能坏了。
+  // 有丢弃（写失败重试放不下 / 队列满）时额外标出来：归档在少记，不能只显示「正常」。
+  function renderArchiveState(ar){
+    const el = $('logArchive');
+    if (!el) return;
+    el.classList.remove('warn');
+    if (!ar){
+      el.textContent = '归档状态未知';
+    } else if (!ar.enabled){
+      el.textContent = '归档已关闭 · 只保留内存中的最近记录';
+    } else if (ar.writable === false){
+      el.classList.add('warn');
+      el.textContent = '归档不可写：' + (ar.error || '目录没有写权限')
+        + (ar.dropped ? ' · 已丢弃 ' + ar.dropped + ' 条' : '');
+    } else if (!ar.files){
+      el.textContent = ar.dropped ? '归档暂无文件 · 已丢弃 ' + ar.dropped + ' 条' : '归档暂无文件';
+    } else {
+      el.textContent = '归档 ' + ar.files + ' 个文件 · ' + fmtBytes(ar.bytes) + ' · 最早 ' + fmtDay(ar.oldest_day)
+        + (ar.dropped ? ' · 已丢弃 ' + ar.dropped + ' 条' : '');
+      if (ar.dropped) el.classList.add('warn');
+    }
+  }
+
+  // ---- usage / balance ----
+  // /api/usage 只剩「本机最近会话」还在这里渲染：token 与请求数已迁到账本（/api/usage/buckets），
+  // 因为那才是能按时间窗口、按模型/账号/凭据切分的数据源。
+  async function loadUsage(force){
+    try{
+      const r = await fetch('/api/usage' + (force?'?force=1':''), { headers: H });
+      const u = await r.json();
+      renderUsageSessions(u);
+    }catch(e){ /* ignore */ }
+  }
+
+  function renderUsageSessions(u){
+    if (!u || !u.tokens) return;
+    const ss = u.sessions || [];
+    $('sessCount').style.display = ss.length ? '' : 'none';
+    $('sessCount').textContent = (u.session_count || ss.length) + ' 个';
+
+    const sessBox = $('sessions');
+    sessBox.textContent = '';
+    ss.forEach(s => {
+      const card = document.createElement('div');
+      card.className = 'sess';
+      const top = document.createElement('div');
+      top.className = 'top';
+      const lab = document.createElement('span');
+      lab.className = 'lab';
+      lab.title = s.label || s.id;
+      lab.textContent = (s.explicit ? '' : '✱ ') + (s.label || s.id);
+      const cnt = document.createElement('span');
+      cnt.className = 'cnt';
+      cnt.textContent = (s.requests || 0) + ' 轮';
+      top.appendChild(lab);
+      top.appendChild(cnt);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const sm = document.createElement('span'); sm.textContent = s.model || '—';
+      const st = document.createElement('span'); st.textContent = fmt(s.tokens) + ' tok · ' + ago(s.lastAt);
+      meta.appendChild(sm); meta.appendChild(st);
+
+      card.appendChild(top);
+      card.appendChild(meta);
+      sessBox.appendChild(card);
+    });
+
+    $('sessNote').textContent = !ss.length
+      ? '还没有会话记录'
+      : (ss.some(s=>!s.explicit)
+          ? '带 ✱ 的是按提示指纹推断的；客户端加 x-session-id 请求头可精确区分'
+          : '会话来自客户端显式 id');
+  }
+
+  // ---- 用量分析（票 08）：时间范围 → KPI / 趋势 / 三张分组表 ----
+  // 窗口二选一：滚动小时窗口（今天/近 7 天/近 30 天）或显式 from/to 闭区间（自定义）。
+  // 「今天」不在这里：它按本地自然日换算成 from/to（见 usageWindow），滚动 24 小时会把昨天傍晚算进来。
+  // 可选范围只在这里列一次：RANGE_HOURS 只管「能折算成滚动小时」的那几个，
+  // 今天/自定义走 from-to，不在这张表里 —— 别拿 RANGE_HOURS 当白名单用。
+  const USAGE_RANGES = ['today', '7d', '30d', 'custom'];
+  const RANGE_HOURS = { '7d': 168, '30d': 720 };
+  const RANGE_LABEL = { today: '今天', '7d': '近 7 天', '30d': '近 30 天', custom: '自定义' };
+
+  function usageWindow(){
+    if (state.usageRange === 'custom'){
+      const from = ($('usageFrom') || {}).value || '';
+      const to = ($('usageTo') || {}).value || '';
+      if (from && to) return { from: localInputToIso(from), to: localInputToIso(to) };
+    }
+    if (state.usageRange === 'today'){
+      // 「今天」= 本地零点到此刻；用滚动 24 小时会把昨天傍晚也算进来。
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return { from: start.toISOString(), to: now.toISOString() };
+    }
+    const range = RANGE_HOURS[state.usageRange] ? state.usageRange : '7d';
+    return { hours: RANGE_HOURS[range] };
+  }
+
+  // 自动档按窗口长度选粒度：≤48 小时按小时才看得清细变化，更长的窗口必须按天，否则柱子挤成一片。
+  // 纯函数：只读传入的窗口（{hours} 或 {from,to}），不碰 state 与 DOM。
+  // 跨度正好 0（零点整选中「今天」、自定义填同一时刻）或异常负数都按小时处理；
+  // 只有拿不到有效跨度（NaN）才退回按天。
+  const USAGE_AUTO_MAX_HOURS = 48;
+  function usageAutoGranularity(w){
+    const hours = w
+      ? (w.hours !== undefined && w.hours !== null
+        ? w.hours
+        : (Date.parse(w.to) - Date.parse(w.from)) / 3600000)
+      : NaN;
+    return Number.isFinite(hours) && hours <= USAGE_AUTO_MAX_HOURS ? 'hour' : 'day';
+  }
+
+  // 查询串只在这里拼：静态检查与排查都只看这一处，页面不会散落几套参数。
+  function usageQuery(){
+    const w = usageWindow();
+    const q = new URLSearchParams();
+    if (w.from && w.to) { q.set('from', w.from); q.set('to', w.to); }
+    else q.set('hours', String(w.hours));
+    // 服务端只认 hour/day：自动档必须在这里解析成具体值，直接发 auto 会 400。
+    q.set('granularity', state.usageGran === 'auto' ? usageAutoGranularity(w) : state.usageGran);
+    // 只看某个账号时才带 account；不带时与改造前完全一致（全量）。
+    if (state.usageAccount) q.set('account', state.usageAccount);
+    return '/api/usage/buckets?' + q.toString();
+  }
+
+  // 读取失败/被拒时统一收口：KPI、趋势与三张表一起退回「—/空态」。
+  // 只清一条空态会把上一次的数字留在页面上，看起来像一次成功的读取。
+  // 空行的 colspan 由列定义推导，与表头同源。
+  function clearUsageTable(def){
+    const table = $(def.tableId);
+    if (!table) return;
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+    tbody.textContent = '';
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = def.columns.length;
+    td.className = 'name';
+    td.textContent = '—';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+
+  function renderUsageFailure(emptyText, metaText){
+    ['kpiRequests', 'kpiFailRate', 'kpiPrompt', 'kpiCompletion',
+      'kpiCacheHit', 'kpiLatency', 'kpiTps', 'kpiCredits'].forEach((id) => {
+      const el = $(id);
+      if (el) el.textContent = '—';
+    });
+    renderUsageChart([]);
+    clearUsageTable(USAGE_TABLES.model);
+    clearUsageTable(USAGE_TABLES.account);
+    clearUsageTable(USAGE_TABLES.key);
+    const empty = $('usageEmpty');
+    if (empty){ empty.textContent = emptyText; empty.classList.add('on'); }
+    const meta = $('usageMeta');
+    if (meta) meta.textContent = metaText || emptyText;
+  }
+
+  // 账号池名单（与仪表盘同源）：只看这个 id 是否还在池里。
+  function usageAccountInPool(id){
+    const pool = (state.dashboard && state.dashboard.pool && state.dashboard.pool.accounts) || [];
+    return pool.some(a => a && a.id === id);
+  }
+
+  // 池子是否已加载完成且非空。空池（仪表盘还没读到、或部署里确实没有账号）
+  // 不足以断言「这个账号消失了」，回退判断必须跳过它。
+  function usageAccountPoolReady(){
+    const pool = state.dashboard && state.dashboard.pool && state.dashboard.pool.accounts;
+    return Array.isArray(pool) && pool.length > 0;
+  }
+
+  async function loadUsageBuckets(){
+    if (state.usageBusy) return;
+    state.usageBusy = true;
+    const meta = $('usageMeta');
+    const btn = $('btnUsageRefresh');
+    if (btn) btn.disabled = true;
+    if (meta) meta.textContent = '读取中…';
+    let retryAll = false;
+    try{
+      const r = await fetch(usageQuery(), { headers: getAdminHeaders(), cache: 'no-store' });
+      if (r.status === 401 || r.status === 403){
+        renderUsageFailure(
+          '没有权限读取用量：这个部署需要有效的调用凭据或管理会话。',
+          '读取被拒绝（HTTP ' + r.status + '）');
+        return;
+      }
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+      // 票 09：带了账号过滤却一行都没有，且这个账号已经不在账号池里（被删除或改名），
+      // 说明过滤条件本身失效了 —— 退回全量并说清楚，否则用户只会看到一片空态。
+      // 池子为空时不触发：仪表盘可能还没加载完，此时无法判断账号是否真的消失，
+      // 贸然回退会把用户刚设好的过滤条件误清掉。
+      if (state.usageAccount && usageAccountPoolReady()
+          && !(Array.isArray(j.by_account) && j.by_account.length)
+          && !usageAccountInPool(state.usageAccount)){
+        state.usageAccount = '';
+        state.usageAccountLabel = '';
+        renderUsageAccountFilter();
+        toast('账号可能已删除或改名，已显示全部');
+        retryAll = true;
+        return;
+      }
+      renderUsageBuckets(j);
+    }catch(e){
+      renderUsageFailure('用量读取失败：' + e.message);
+    }finally{
+      state.usageBusy = false;
+      if (btn) btn.disabled = false;
+      if (retryAll) loadUsageBuckets();
+    }
+  }
+
+  // 没有样本时一律算「没有」：null/undefined/非数都返回 null，绝不让 NaN 漏到页面上。
+  // 三个格式化函数共用这一处判断，避免各写一份守卫后口径各自漂移。
+  function usageFinite(v){
+    if (v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function usageNum(v, unit){
+    const n = usageFinite(v);
+    if (n === null) return '—';
+    return fmt(n) + (unit ? ' ' + unit : '');
+  }
+
+  function usagePct(v){
+    const n = usageFinite(v);
+    if (n === null) return '—';
+    return (n * 100).toFixed(1) + '%';
+  }
+
+  // 估算消耗全页统一六位小数、不带货币符号：它是积分口径的估算值，不是账单金额。
+  // 六位小数是为了小流量下也能看到真实量级（两位小数会把 0.001588 显示成 0.00）。
+  function usageCredits(v){
+    const n = usageFinite(v);
+    if (n === null) return '—';
+    return n.toLocaleString('zh-CN', { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+  }
+
+  function rateRange(rates){
+    const list = (Array.isArray(rates) ? rates : []).filter(r => typeof r === 'number' && Number.isFinite(r));
+    if (!list.length) return '—';
+    const lo = Math.min.apply(null, list);
+    const hi = Math.max.apply(null, list);
+    return lo === hi ? lo + 'x' : lo + 'x ~ ' + hi + 'x';
+  }
+
+  // ---- 趋势数据整形与 tooltip 文案 ----
+  // 这三处都只做「数据/文本 → 数据/文本」，不碰 DOM、不读 state，
+  // 所以能在 vm 沙箱里单独跑测试；图表渲染与降级柱状图共用同一份结果。
+
+  // 紧凑数字：1.2k / 3.4M。千分位仍归 fmt，两种写法不混用；
+  // 千位以下原样整数，缺样本（null/undefined/非数）返回「—」而不是 0。
+  function usageCompact(v){
+    const n = usageFinite(v);
+    if (n === null) return '—';
+    const abs = Math.abs(n);
+    if (abs >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (abs >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+    return String(Math.round(n));
+  }
+
+  // 时间片的人话名字。scope=day 的点是整日汇总（按天粒度，或小时粒度下已折叠的日桶），
+  // 必须说清「全天」，否则会被读成「凌晨那一个小时」。
+  function usageSlotText(point){
+    const p = point || {};
+    const slot = (p.slot === null || p.slot === undefined) ? '—' : String(p.slot);
+    return p.scope === 'day' ? slot + '（全天）' : slot;
+  }
+
+  // 趋势点 → 图表直接能吃的东西：轴标签 + 四条等长数组。
+  // 柱高只由 prompt + completion 两段堆叠而成，绝不拿 total_tokens 顶替或修正任一段：
+  // 思考模型上两者本来就不相等，凑数会让图和账本对不上。
+  // total_tokens 只出现在 tooltip 里，所以这里不再产出用不到的 total 数组。
+  function usageTrendSeries(series){
+    const rows = Array.isArray(series) ? series : [];
+    const out = { labels: [], prompt: [], completion: [], requests: [], errors: [] };
+    rows.forEach((row) => {
+      const p = row || {};
+      const prompt = usageFinite(p.prompt_tokens);
+      const completion = usageFinite(p.completion_tokens);
+      out.labels.push(usageSlotText(p));
+      out.prompt.push(prompt === null ? 0 : prompt);
+      out.completion.push(completion === null ? 0 : completion);
+      out.requests.push(usageFinite(p.requests) || 0);
+      out.errors.push(usageFinite(p.errors) || 0);
+    });
+    return out;
+  }
+
+  // 一个趋势点 → tooltip 的若干行，字段顺序固定：
+  // 时间 → 输入 → 输出 → 合计 token → 请求数 · 失败数 → 缓存命中率 → 平均延迟 → 估算消耗。
+  // 缺样本的字段一律给「—」（不是 0%），与 KPI 卡片的 null 口径一致。
+  function usageTrendTooltip(point){
+    const p = point || {};
+    const prompt = usageFinite(p.prompt_tokens);
+    const completion = usageFinite(p.completion_tokens);
+    const declaredTotal = usageFinite(p.total_tokens);
+    // 合计优先用账本给的 total_tokens；老账本没有这个字段时退回两段之和，
+    // 免得 tooltip 和柱高（两段之和）自相矛盾。仍然不改动任何一段。
+    const total = declaredTotal !== null ? declaredTotal : (prompt || 0) + (completion || 0);
+    const latency = usageFinite(p.avg_latency_ms);
+    return [
+      usageSlotText(p),
+      '输入 ' + usageCompact(prompt) + ' token',
+      '输出 ' + usageCompact(completion) + ' token',
+      '合计 ' + usageCompact(total) + ' token',
+      '请求 ' + usageCompact(p.requests) + ' · 失败 ' + usageCompact(p.errors),
+      '缓存命中 ' + usagePct(p.cache_hit_rate),
+      '平均延迟 ' + (latency === null ? '—' : usageNum(Math.round(latency), 'ms')),
+      '估算消耗 ' + usageCredits(p.credits) + '（估算）',
+    ];
+  }
+
+  function renderUsageBuckets(j){
+    const t = (j && j.totals) ? j.totals : (j || {});
+    const requests = Number(t.requests) || 0;
+    const errors = Number(t.errors) || 0;
+
+    $('kpiRequests').textContent = usageNum(requests);
+    $('kpiFailRate').textContent = requests ? usagePct(errors / requests) : '—';
+    $('kpiPrompt').textContent = usageNum(t.prompt_tokens);
+    $('kpiCompletion').textContent = usageNum(t.completion_tokens);
+    $('kpiCacheHit').textContent = usagePct(t.cache_hit_rate);
+    $('kpiLatency').textContent = (t.avg_latency_ms === null || t.avg_latency_ms === undefined)
+      ? '—' : usageNum(Math.round(Number(t.avg_latency_ms)), 'ms');
+    $('kpiTps').textContent = (t.avg_tokens_per_second === null || t.avg_tokens_per_second === undefined)
+      ? '—' : usageNum(Math.round(Number(t.avg_tokens_per_second) * 10) / 10, 'tok/s');
+    $('kpiCredits').textContent = requests ? usageCredits(t.credits) : '—';
+
+    // 空账本：给文案，而不是一排 0 和一张空白图。
+    // 带账号过滤时还要说清「可能账号已经不在了」：旧入口（收藏、别人发的链接）点进来
+    // 不该只看到一句「没有用量」，否则会以为是账本坏了。
+    const empty = requests === 0;
+    const emptyBox = $('usageEmpty');
+    emptyBox.textContent = state.usageAccount
+      ? `账号「${usageAccountFilterName()}」近一段时间没有用量记录。账号可能已被删除或改名；点「清除过滤」可回到全量视图。`
+      : '这段时间没有用量记录。账本还是空的：发起一次对话后，这里会出现请求数、趋势与分组明细。';
+    emptyBox.classList.toggle('on', empty);
+
+    const label = state.usageRange === 'custom'
+      ? ((usageWindow().from || '—') + ' ~ ' + (usageWindow().to || '—'))
+      : (RANGE_LABEL[state.usageRange] || '近 7 天');
+    $('usageRangeBadge').textContent = label;
+
+    const gran = j && j.granularity === 'hour' ? '按小时' : '按天';
+    $('usageMeta').textContent = (state.usageAccount ? '只看账号 ' + usageAccountFilterName() + ' · ' : '')
+      + '窗口 ' + (j.from || '—') + ' → ' + (j.to || '—') + ' · ' + gran + '粒度'
+      + ' · 更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false })
+      + (j.clamped ? ' · 请求窗口超过 60 天，已按上限截断' : '');
+
+    renderUsageChart(j.series);
+    renderUsageTable(USAGE_TABLES.model, j.by_model);
+    renderUsageTable(USAGE_TABLES.account, j.by_account);
+    renderUsageTable(USAGE_TABLES.key, j.by_key);
+  }
+
+  // 起止时间 + 合计 + 容器读屏文案：两条渲染路径共用，换渲染方式不换读数。
+  // 返回 totalReq 方便调用方判断是否为空；0 请求时给与页面其它空态同口径的文案，
+  // 不再让兜底路径说「暂无数据」、主路径说另一句。
+  function renderUsageChartSummary(box, rows){
+    const list = Array.isArray(rows) ? rows : [];
+    const totalReq = list.reduce((s, r) => s + (Number(r && r.requests) || 0), 0);
+    const totalTok = list.reduce((s, r) => s + (Number(r && r.total_tokens) || 0), 0);
+    $('usageChartFrom').textContent = list.length ? String(list[0].slot) : '—';
+    $('usageChartTo').textContent = list.length ? String(list[list.length - 1].slot) : '—';
+    const note = totalReq
+      ? '合计 ' + fmt(totalReq) + ' 次请求 · ' + fmt(totalTok) + ' token'
+      : '这段时间没有用量记录';
+    $('usageChartNote').textContent = note;
+    // 柱子不可聚焦后，读屏用户按容器整体听到的就是这一句汇总。
+    box.setAttribute('aria-label', '请求趋势图：' + note);
+    return totalReq;
+  }
+
+  // 兜底路径：图表库不可用时用这排纯 DOM 柱子把图画出来，不留空白。
+  // 趋势图：纯 DOM 柱状条。容器是 list、每根柱子是 listitem 并带 aria-label。
+  // 柱子不参与 Tab 键序列：几十根柱子逐个聚焦只会把键盘用户困在图表里；
+  // 整块的量级由下面的汇总文案（以及容器的 aria-label）一次说清。
+  function renderUsageChartBars(series){
+    const box = $('usageChart');
+    box.textContent = '';
+    const rows = Array.isArray(series) ? series : [];
+    if (!renderUsageChartSummary(box, rows)){
+      // 0 请求时不能只留一句「暂无数据」的空容器：与主路径一样给空态。
+      box.removeAttribute('role');
+      renderUsageChartEmpty(box);
+      return;
+    }
+    box.setAttribute('role', 'list');
+    box.classList.toggle('sparse', rows.length <= 40);
+
+    const max = rows.reduce((m, r) => Math.max(m, Number(r.requests) || 0), 0);
+    rows.forEach(r => {
+      const req = Number(r.requests) || 0;
+      const err = Number(r.errors) || 0;
+      const bar = document.createElement('div');
+      bar.className = 'bar' + (req === 0 ? ' zero' : (err > 0 ? ' fail' : ''));
+      bar.setAttribute('role', 'listitem');
+      const fill = document.createElement('i');
+      // 0 请求的槽位留 2px 基线：既看不出「有数据」，也不会让时间轴整段消失。
+      fill.style.height = (max > 0 && req > 0) ? Math.max(3, Math.round(req / max * 100)) + '%' : '2px';
+      bar.appendChild(fill);
+      // scope=day 的点是整日汇总（按天粒度，或小时粒度下已折叠的日桶），
+      // 不能和真正的小时柱用同一种文案，否则会被读成「凌晨这一个小时」。
+      const slotText = usageSlotText(r);
+      const label = slotText + ' · 请求 ' + req + ' · 失败 ' + err + ' · ' + fmt(Number(r.total_tokens) || 0) + ' token';
+      bar.setAttribute('title', label);
+      bar.setAttribute('aria-label', label);
+      box.appendChild(bar);
+    });
+  }
+
+  // 0 请求的空态：绝对定位铺在绘图区上，不撑高容器。
+  // 文案与页面其它空态同口径（`usageEmpty` 那句），不用没头没尾的「暂无数据」。
+  function renderUsageChartEmpty(box){
+    box.textContent = '';
+    const empty = document.createElement('div');
+    empty.className = 'usage-chart-empty';
+    empty.textContent = '这段时间没有用量记录。发起一次对话后，这里会出现趋势。';
+    box.appendChild(empty);
+  }
+
+  // 票 05：双轴组合图。左轴 token（输入 + 输出两段堆叠柱），右轴次数（请求数折线）。
+  // 柱高只由两段堆叠而成，绝不拿 total_tokens 顶替或修正任一段。
+  // Chart.js 拿不到时一行委托给兜底柱子：宁可丑，不能留白。
+  function renderUsageChart(series){
+    // 先销毁上一张图：切范围/粒度会反复调用，不销毁就会在同一个容器里堆 canvas。
+    if (state.usageChart){ state.usageChart.destroy(); state.usageChart = null; }
+    // 库不可用有两个口子：根本没拿到 window.Chart，或脚本 tag 的 onerror 已经置位。
+    // script 带 defer 写在 <head>，onerror 可能晚于本脚本执行——只看 window.Chart
+    // 会漏掉「加载失败但留了个空壳」的那种情况。
+    if (!window.Chart || window.__chartLoadFailed){ renderUsageChartBars(series); return; }
+
+    const box = $('usageChart');
+    const trendRows = Array.isArray(series) ? series : [];
+
+    // 底部「起止时间 + 合计」与兜底路径同一口径：换渲染方式不换读数。
+    const totalReq = renderUsageChartSummary(box, trendRows);
+
+    // 0 请求：不画一副空坐标轴。上一步已销毁旧图，这里再把它的 canvas 清掉，只留空态。
+    if (!totalReq){
+      box.removeAttribute('role');
+      renderUsageChartEmpty(box);
+      return;
+    }
+
+    box.textContent = '';
+    // 图表在时容器自己就是一张图（role=img），canvas 不再重复声明，避免嵌套。
+    box.setAttribute('role', 'img');
+    const data = usageTrendSeries(trendRows);
+    const dense = data.labels.length > 120;
+    // 票 06：失败数为 0 的时间点不画点——一条贴着底的零线不是信息，是噪音。
+    // spanGaps 只跳 null/NaN，不会跳过 0，所以先把非正数映射成 null，零线才真正断开。
+    const failureData = data.errors.map((v) => (Number(v) > 0 ? Number(v) : null));
+    const hasError = data.errors.some((v) => Number(v) > 0);
+    const errorDots = data.errors.map((v) => (!dense && Number(v) > 0 ? 2 : 0));
+
+    // canvas 由渲染层自己建：静态结构里只留位置与样式（票 03 的契约）。
+    const canvas = document.createElement('canvas');
+    canvas.setAttribute('aria-label', '用量趋势：输入与输出 token 堆叠柱，请求数折线');
+    box.appendChild(canvas);
+
+    state.usageChart = new window.Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: data.labels,
+        datasets: [
+          { label: '输入 token', data: data.prompt, backgroundColor: '#818cf8',
+            stack: 'tokens', yAxisID: 'y', maxBarThickness: 28, borderRadius: 2 },
+          { label: '输出 token', data: data.completion, backgroundColor: '#4f46e5',
+            stack: 'tokens', yAxisID: 'y', maxBarThickness: 28, borderRadius: 2 },
+          { type: 'line', label: '请求数', data: data.requests, yAxisID: 'y1',
+            borderColor: '#0ea5e9', backgroundColor: '#0ea5e9', borderWidth: 2,
+            pointRadius: dense ? 0 : 2, pointHoverRadius: 3, tension: 0.3, fill: false },
+          // 失败数与请求数共用右轴（同量级可比）：请求数没掉、这条线翘起来，就是上游在出问题。
+          // 整段区间零失败时整体隐藏，图上不留一条压着底部的零线；图例项仍在，可点开。
+          { type: 'line', label: '失败数', data: failureData, yAxisID: 'y1',
+            borderColor: '#dc2626', backgroundColor: '#dc2626', borderWidth: 1.5,
+            borderDash: [4, 3], pointRadius: errorDots, pointHoverRadius: 3,
+            tension: 0, spanGaps: true, fill: false, hidden: !hasError },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          // 图例置顶；可点击隐藏系列是 Chart.js 的默认行为。
+          legend: { position: 'top', labels: { boxWidth: 10, boxHeight: 10, padding: 8, font: { size: 10 } } },
+          tooltip: {
+            displayColors: false,
+            callbacks: {
+              // 文案走票 02 的成品：一个时间点的全部字段一次给出，不按系列拆开重复。
+              title: () => '',
+              beforeBody: (items) => (items.length ? usageTrendTooltip(trendRows[items[0].dataIndex]) : []),
+              label: () => '',
+            },
+          },
+        },
+        scales: {
+          // X 轴不画纵向网格；点多时最多 8 个刻度，柱子由 Chart.js 自动压细。
+          x: { stacked: true, grid: { display: false },
+            ticks: { autoSkip: true, maxTicksLimit: dense ? 8 : undefined, maxRotation: 0, font: { size: 9 } } },
+          // 左轴 token：从 0 起，刻度用紧凑数字（1.2k / 3.4M）。
+          y: { beginAtZero: true, stacked: true, position: 'left',
+            grid: { display: true, drawTicks: false }, border: { display: false },
+            ticks: { font: { size: 9 }, callback: (v) => usageCompact(v) } },
+          // 右轴次数：单独一把尺子，整数刻度，不重复画横向网格。
+          y1: { beginAtZero: true, position: 'right', grid: { display: false }, border: { display: false },
+            ticks: { precision: 0, font: { size: 9 } } },
+        },
+      },
+    });
+  }
+
+  // 三张分组表的列只在这里定义一次：表头（由列定义生成）、每行单元格与空行 colspan
+  // 全都从同一份定义推导。以前是 opts.cols 写死 6/5/5、再用 i===1 这样的小标定位「失败」列，
+  // 一改列序或加列就会出现「表头 6 列、数据 5 格」的静默错位。和日志表同一类修法。
+  function usageMetricColumns(withRates){
+    const cols = [
+      { key: 'requests', label: '请求', num: true, text: (row) => usageNum(row.requests) },
+      { key: 'errors', label: '失败', num: true, text: (row) => usageNum(row.errors),
+        // 失败数非 0 时整格标红：列语义写在定义里，不再靠格子下标。
+        cls: (row) => (Number(row.errors) > 0 ? 'err-num' : '') },
+      { key: 'total_tokens', label: 'token', num: true, text: (row) => usageNum(row.total_tokens) },
+      { key: 'credits', label: '估算消耗', num: true, text: (row) => usageCredits(row.credits) },
+    ];
+    if (withRates) cols.push({ key: 'rates', label: '倍率', text: (row) => rateRange(row.rates) });
+    return cols;
+  }
+
+  const USAGE_TABLES = {
+    model: {
+      tableId: 'usageModelTable', field: 'model', fallback: '（未知模型）',
+      columns: [{ key: 'model', label: '模型', name: true }].concat(usageMetricColumns(true)),
+    },
+    account: {
+      tableId: 'usageAccountTable', field: 'account', fallback: '（未指定账号）', linkAccount: true,
+      columns: [{ key: 'account', label: '账号', name: true }].concat(usageMetricColumns(false)),
+    },
+    key: {
+      tableId: 'usageKeyTable', field: 'key', fallback: '（无凭据）',
+      columns: [{ key: 'key', label: '凭据', name: true }].concat(usageMetricColumns(false)),
+    },
+  };
+
+  function renderUsageTable(def, rows){
+    const table = $(def.tableId);
+    if (!table) return;
+    const columns = def.columns;
+    // 表头也从列定义生成：静态 HTML 不手写 <th>，列数/列序不可能和单元格各走一套。
+    const thead = table.querySelector('thead');
+    if (thead){
+      thead.textContent = '';
+      const htr = document.createElement('tr');
+      for (const col of columns){
+        const th = document.createElement('th');
+        if (col.num) th.className = 'num';
+        th.textContent = col.label;
+        htr.appendChild(th);
+      }
+      thead.appendChild(htr);
+    }
+    const tbody = table.querySelector('tbody');
+    tbody.textContent = '';
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length){
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = columns.length;
+      td.className = 'name';
+      td.textContent = '暂无数据';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+    list.forEach(row => {
+      const tr = document.createElement('tr');
+      for (const col of columns){
+        const td = document.createElement('td');
+        if (col.name){
+          const raw = row[def.field] !== undefined && row[def.field] !== null ? row[def.field] : row.key;
+          const text = raw ? String(raw) : def.fallback;
+          td.className = 'name';
+          td.title = text;
+          if (def.linkAccount && raw){
+            // 「按账号」表每行的账号名是去日志的入口：按钮保证键盘可达，
+            // 不再给整行挂 onclick —— 行内入口只有一个，点击与回车都只触发一次。
+            const link = document.createElement('button');
+            link.type = 'button';
+            link.className = 'usage-account-link';
+            link.dataset.account = String(raw);
+            link.title = '在请求日志里只看这个账号';
+            link.textContent = text;
+            link.onclick = () => openLogsForAccount(raw);
+            td.appendChild(link);
+          } else {
+            td.textContent = text;
+          }
+        } else {
+          const extra = col.cls ? col.cls(row) : '';
+          td.className = 'num' + (extra ? ' ' + extra : '');
+          td.textContent = col.text(row);
+        }
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    });
+  }
+
+  function usageDateStr(offsetDays){
+    const d = new Date(Date.now() + offsetDays * 86400000);
+    const p = (x) => String(x).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+
+  function prefillUsageDates(){
+    const from = $('usageFrom');
+    const to = $('usageTo');
+    if (!from || !to) return;
+    if (!from.value) from.value = usageDateStr(-6);
+    if (!to.value) to.value = usageDateStr(0);
+  }
+
+  // 分段按钮组（时间范围 / 粒度）只有这一个入口：高亮与 aria-pressed 一起同步，
+  // 视觉选中态和读屏状态不会各说各话。
+  function setSegmented(container, attr, value){
+    if (!container) return;
+    container.querySelectorAll('[' + attr + ']').forEach(btn => {
+      const on = btn.getAttribute(attr) === value;
+      btn.classList.toggle('on', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  function initUsagePage(){
+    const rangeBox = $('usageRange');
+    if (!rangeBox) return;
+    rangeBox.querySelectorAll('[data-range]').forEach(btn => {
+      btn.onclick = () => {
+        applyUsageRange(btn.dataset.range);
+        loadUsageBuckets();
+      };
+    });
+
+    $('btnUsageApply').onclick = () => {
+      const from = $('usageFrom').value;
+      const to = $('usageTo').value;
+      if (!from || !to){ toast('自定义范围需要同时选择开始和结束日期'); return; }
+      if (from > to){ toast('开始日期不能晚于结束日期'); return; }
+      // 仍走 applyUsageRange：分段按钮的 .on 与 aria-pressed 由它统一同步，
+      // 这里若直接改 state 会切到自定义却把「近 7 天」留在高亮上。
+      applyUsageRange('custom');
+      loadUsageBuckets();
+    };
+
+    const granBox = $('usageGranularity');
+    granBox.querySelectorAll('[data-gran]').forEach(btn => {
+      btn.onclick = () => {
+        setUsageGran(btn.dataset.gran);
+        loadUsageBuckets();
+      };
+    });
+
+    $('btnUsageRefresh').onclick = () => loadUsageBuckets();
+    $('btnUsageClearAccount').onclick = () => clearUsageAccountFilter();
+
+    // 首屏把 aria-pressed 与 HTML 里的静态高亮对齐（静态标记只有 class="on"）。
+    setSegmented(rangeBox, 'data-range', state.usageRange);
+    setSegmented(granBox, 'data-gran', state.usageGran);
+  }
+
+  // 时间范围只有这一个入口：按钮点击与面板互跳都走它，避免跳转后按钮高亮与状态对不上。
+  function applyUsageRange(range){
+    state.usageRange = USAGE_RANGES.indexOf(range) >= 0 ? range : '7d';
+    setSegmented($('usageRange'), 'data-range', state.usageRange);
+    $('usageCustom').classList.toggle('on', state.usageRange === 'custom');
+    if (state.usageRange === 'custom') prefillUsageDates();
+    // 粒度不再由范围硬改：自动档在 usageQuery() 里按窗口长度算，
+    // 手动选小时/天则保持用户的选择，两种范围切换都一样。
+  }
+
+  // ---- 面板互跳（票 09） ----
+  // 三处入口共用这里的实现：账号池「用量」→ 用量页（只看该账号、近 7 天）；
+  // 用量页「按账号」行 → 日志页（按账号筛选，复用票 04 的输入与查询）。
+  function usageAccountFilterName(){
+    return state.usageAccountLabel || state.usageAccount || '';
+  }
+
+  function renderUsageAccountFilter(){
+    const box = $('usageAccountFilter');
+    if (!box) return;
+    const on = Boolean(state.usageAccount);
+    box.classList.toggle('on', on);
+    if (on) $('usageAccountFilterName').textContent = usageAccountFilterName();
+  }
+
+  function openUsageForAccount(accountId, label){
+    if (!accountId) return;
+    state.usageAccount = String(accountId);
+    state.usageAccountLabel = label || String(accountId);
+    // 票面要求：从账号池跳过去固定看近 7 天。
+    applyUsageRange('7d');
+    renderUsageAccountFilter();
+    switchTab('usage');
+  }
+
+  function clearUsageAccountFilter(){
+    state.usageAccount = '';
+    state.usageAccountLabel = '';
+    // 「清除过滤」回到全量，但时间范围保持默认的近 7 天。
+    applyUsageRange('7d');
+    renderUsageAccountFilter();
+    if (state.tab === 'usage') loadUsageBuckets();
+  }
+
+  // 用量账本的账号是账号 id，日志里的账号是名字 + 短指纹（票 03 刻意不把 id 写进日志），
+  // 所以跳日志前用仪表盘里的账号池把 id 换成名字；换不到（账号已删除）就用 id 兜底，
+  // 最坏情况是日志筛选命中 0 条并显示空态，而不是报错。
+  function accountNameById(id){
+    const pool = (state.dashboard && state.dashboard.pool && state.dashboard.pool.accounts) || [];
+    const hit = pool.find(a => a && a.id === id);
+    return (hit && (hit.name || hit.id)) || '';
+  }
+
+  function openLogsForAccount(accountId, label){
+    const name = label || accountNameById(accountId) || String(accountId || '');
+    if (!name) return;
+    $('logFilterAccount').value = name;
+    switchTab('logs');
+  }
+
+  function setUsageGran(gran){
+    state.usageGran = gran === 'hour' || gran === 'day' ? gran : 'auto';
+    setSegmented($('usageGranularity'), 'data-gran', state.usageGran);
+  }
+
+  // ---- 运维仪表盘（首屏常驻，GLM 之外不依赖任何浮层） ----
+  async function loadDashboard(force){
+    if (state.dashLoading) return;
+    state.dashLoading = true;
+    const btn = $('btnDashRefresh');
+    if (btn) btn.disabled = true;
+    try{
+      const r = await fetch('/api/dashboard' + (force ? '?force=1' : ''), { headers: H });
+      if (r.status === 401){
+        $('dashUpdated').textContent = '需要访问密钥后才能读取仪表盘';
+        return;
+      }
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+      state.dashboard = j;
+      renderDashboard(j);
+    }catch(e){
+      $('dashUpdated').textContent = '仪表盘读取失败：' + e.message;
+    }finally{
+      state.dashLoading = false;
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function dashNum(n){ return (typeof n === 'number' && isFinite(n)) ? n : null; }
+
+  // 大号 KPI 带单位后缀（避免用 innerHTML 拼字符串）
+  function setKpi(el, value, suffix){
+    el.textContent = String(value);
+    if (suffix){
+      const s = document.createElement('small');
+      s.textContent = ' ' + suffix;
+      el.appendChild(s);
+    }
+  }
+
+  function renderDashboard(j){
+    const t = new Date(j.generated_at || Date.now());
+    $('dashUpdated').textContent = '更新于 ' + t.toLocaleTimeString('zh-CN', { hour12: false }) + ' · 15 秒刷新';
+
+    const pool = j.pool || {};
+    $('dashPoolReady').textContent = (pool.ready || 0) + '/' + (pool.total || 0);
+    $('dashPoolReady').insertAdjacentHTML('beforeend', '<small> ready</small>');
+    $('dashPoolBadge').textContent = pool.ready > 0 ? '就绪' : '未就绪';
+    $('dashPoolSub').textContent = '可用 ' + (pool.ready || 0) + ' · 总数 ' + (pool.total || 0) + (pool.disabled ? ' · 已禁用 ' + pool.disabled : '');
+    const list = $('dashPoolList');
+    list.textContent = '';
+    (pool.accounts || []).forEach(a => {
+      const row = document.createElement('div');
+      row.className = 'dash-acc';
+      const dot = document.createElement('span');
+      const dotState = !a.enabled ? 'off'
+        : (a.paused ? 'warn'
+          : (a.ready ? '' : ((a.status === 'credentials_missing' || a.status === 'needs_reauth') ? 'err' : 'warn')));
+      dot.className = 'dash-dot ' + dotState;
+      const nm = document.createElement('span');
+      nm.className = 'nm';
+      nm.textContent = a.name || a.id;
+      const st = document.createElement('span');
+      st.textContent = !a.enabled ? '已禁用'
+        : (a.paused ? '暂停选号' : (a.ready ? (a.models_count ? a.models_count + ' 个模型' : 'ready') : (a.status || '未就绪')));
+      row.appendChild(dot); row.appendChild(nm); row.appendChild(st);
+      list.appendChild(row);
+    });
+    if (!(pool.accounts || []).length) list.textContent = '还没有账号';
+
+    const c = j.credits || {};
+    const reauth = $('dashReauthRow');
+
+    // 总览：可用 / 总额 并列；逐账号分条由 paintCreditsAccounts 单独渲染
+    function paintCredits(total, used, remain, subText, noteText){
+      paintCreditsAccounts(null, null); // 默认收起分条，成功分支再按账号填充
+      setKpi($('dashCreditsAvail'), remain != null ? fmt(remain) : '—', '可用');
+      setKpi($('dashCreditsUsed'), used != null ? fmt(used) : '—', '已用');
+      $('dashCreditsTotal').textContent = creditsTotalText(total, remain);
+      $('dashCreditsSub').textContent = subText || '';
+      $('dashCreditsNote').textContent = noteText || '';
+      const prog = $('dashCreditsProg');
+      // 条按「可用占比」填充：绿色＝还能用多少，剩余见底才转黄/红
+      const availPct = creditsAvailPct(total, remain, used);
+      if (availPct != null){
+        prog.style.display = '';
+        prog.className = creditsBarClass(availPct);
+        prog.querySelector('i').style.width = availPct + '%';
+      } else {
+        prog.style.display = 'none';
+      }
+    }
+
+    if (c.ok){
+      const accounts = c.accounts || {};
+      const okAccounts = Object.values(accounts).filter(a => a && a.ok);
+      let planRemain = 0, benefitRemain = 0, addonRemain = 0, hasQuota = false;
+      const expires = [];
+      for (const a of okAccounts){
+        const p = a.plan && dashNum(a.plan.remaining);
+        const b = a.benefit && dashNum(a.benefit.remaining);
+        const d = a.addons && dashNum(a.addons.remaining);
+        if (p != null){ planRemain += p; hasQuota = true; }
+        if (b != null){ benefitRemain += b; hasQuota = true; }
+        if (d != null){ addonRemain += d; hasQuota = true; }
+        if (a.expire_at) expires.push(a.expire_at);
+      }
+      const total = dashNum(c.total_total);
+      const used = dashNum(c.total_used);
+      // 权威汇总只认后端聚合值：前端不再用套餐+赠送+加油包重算一遍，
+      // 否则口径一改就要同时改前后端两处（下面的分项只用于明细文案与环图）。
+      const remain = dashNum(c.total_remaining);
+      const parts = [];
+      if (hasQuota){
+        if (planRemain > 0) parts.push('套餐 ' + fmt(planRemain));
+        if (benefitRemain > 0) parts.push('赠送 ' + fmt(benefitRemain));
+        if (addonRemain > 0) parts.push('加油包 ' + fmt(addonRemain));
+      }
+      $('dashCreditsPlan').textContent = okAccounts.length === 1
+        ? (okAccounts[0].plan_name || 'credits')
+        : (okAccounts.length + ' 个账号');
+      paintCredits(total, used, remain,
+        parts.length ? parts.join(' · ') : '已读取账号积分',
+        expires.length ? ('最近到期 ' + expires.sort()[0]) : '');
+      paintCreditsAccounts(c, pool.accounts);
+      reauth.style.display = 'none';
+    }else if (c.error === 'reauth_required'){
+      $('dashCreditsPlan').textContent = '需授权';
+      paintCredits(null, null, null, '需要重新授权',
+        '当前账号只有 Router Key，没有 refresh token。走一次设备授权后即可自动续期，之后不再要求登录。');
+      reauth.style.display = '';
+    }else if (c.error === 'not_applicable'){
+      $('dashCreditsPlan').textContent = '挂载账号';
+      paintCredits(null, null, null, '不读取积分',
+        '只读挂载账号没有账号登录态；改用设备授权账号即可显示 credits。');
+      reauth.style.display = 'none';
+    }else{
+      $('dashCreditsPlan').textContent = '不可用';
+      paintCredits(null, null, null, c.message || c.error || '积分读取失败', '');
+      reauth.style.display = 'none';
+    }
+
+    const models = ((state.models && state.models.length) ? state.models : (j.models || [])).map(modelView);
+    const sel = $('dashModelSelect');
+    if (sel.options.length !== models.length){
+      sel.textContent = '';
+      models.forEach(m => {
+        const o = document.createElement('option');
+        o.value = m.id;
+        o.textContent = m.id === m.name ? m.id : (m.name + ' · ' + m.id);
+        sel.appendChild(o);
+      });
+    }
+    const current = state.model || (models[0] && models[0].id) || '';
+    if (current) sel.value = current;
+    syncDashModel(current);
+
+    renderDashboardCharts(j);
+  }
+
+  function syncDashModel(id){
+    const badge = $('dashModelRatio');
+    const meta = $('dashModelMeta');
+    if (!id){
+      // 没有选中模型时把上一轮的徽标与 tooltip 清掉，否则会残留别的模型的倍率。
+      badge.textContent = '—';
+      badge.removeAttribute('title');
+      meta.textContent = '选择模型后显示倍率与上下文';
+      return;
+    }
+    const raw = ((state.models && state.models.length) ? state.models : ((state.dashboard && state.dashboard.models) || []))
+      .find(x => x.id === id);
+    const sel = $('dashModelSelect');
+    if (sel && sel.value !== id) sel.value = id;
+    if (!raw){
+      badge.textContent = '—';
+      badge.removeAttribute('title');
+      meta.textContent = '未找到该模型的倍率信息';
+      return;
+    }
+    const m = modelView(raw);
+    // 只有后端从 /v1/models 拿到的 ratio 才是真实计费倍率；抓取失败时 MODEL_INFO 里
+    // 留着本地 config.json 的占位值，直接当权威值显示等于骗人（评审点）。
+    const label = ratioLabel(m);
+    const unknown = label.text === '—';
+    badge.textContent = label.shown;
+    badge.title = label.real
+      ? '来自上游 /v1/models 的真实计费倍率'
+      : (unknown ? '该模型没有倍率信息（上游未返回，本地也没有配置）' : '上游倍率未取到，这是本地配置的占位值，不能作为计费依据');
+    const bits = [m.name];
+    if (m.contextWindow) bits.push(Math.round(m.contextWindow / 1024) + 'k ctx');
+    if (m.costTag) bits.push(m.costTag);
+    if (m.reasoning) bits.push('推理');
+    if (!label.real && !unknown) bits.push('倍率为本地配置值');
+    else if (unknown) bits.push('倍率未知');
+    meta.textContent = bits.join(' · ');
+  }
+
+  // 仪表盘快捷键：已登录管理会话时直接打开对应表单；未登录则按部署形态分流
+  // （配了口令 → 登录后续跳；没配口令 → 先补访问密钥，而不是弹一个必然失败的口令框）。
+  async function runAdminShortcut(flow){
+    const st = await getAdminSession();
+    if (st.authenticated) {
+      await openAdminPanel(st);
+      $(flow === 'add-account' ? 'btnShowAddAccount' : 'btnShowCreateKey').click();
+      return;
+    }
+    if (st.configured) {
+      if (flow === 'add-account') PENDING_ADD_ACCOUNT = true;
+      else PENDING_CREATE_KEY = true;
+      showAdminLogin();
+      return;
+    }
+    await ensureAdminThen(async (s) => {
+      await openAdminPanel(s);
+      $(flow === 'add-account' ? 'btnShowAddAccount' : 'btnShowCreateKey').click();
+    }, 'accounts', st);
+  }
+
+  function openAddAccountFlow(){ return runAdminShortcut('add-account'); }
+  function openCreateKeyFlow(){ return runAdminShortcut('create-key'); }
+
+  function dashChartColors(){
+    return ['#4f46e5', '#0ea5e9', '#16a34a', '#d97706', '#dc2626', '#7c3aed'];
+  }
+
+  function renderDashboardCharts(j){
+    if (!window.Chart) return; // CDN 不可用时静默降级为文本
+    // 仪表盘只在对话视图可见；隐藏时容器宽度是 0，此时重绘出来的图尺寸是错的，
+    // 还会白白销毁重建。切回对话时由 switchTab 重新调用本函数补画。
+    const dash = $('dashboard');
+    if (dash && (dash.offsetParent === null || dash.getBoundingClientRect().width === 0)) return;
+    if (state.modelChart){ state.modelChart.destroy(); state.modelChart = null; }
+    const bm = (j.local && j.local.by_model) || {};
+    const entries = Object.entries(bm)
+      .filter(([, v]) => v && v.tokens > 0)
+      .sort((a, b) => b[1].tokens - a[1].tokens)
+      .slice(0, 6);
+    // 只有一个模型时条形图会变成一整块，没有信息量；至少两个模型才画。
+    const showModelChart = entries.length >= 2;
+    $('dashModelChartWrap').style.display = showModelChart ? '' : 'none';
+    if (showModelChart){
+      state.modelChart = new Chart($('dashModelChart'), {
+        type: 'bar',
+        data: {
+          labels: entries.map(([k]) => k.length > 12 ? k.slice(0, 11) + '…' : k),
+          datasets: [{ data: entries.map(([, v]) => v.tokens), backgroundColor: '#4f46e5', borderRadius: 4 }],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { display: false, beginAtZero: true },
+            y: { display: true, ticks: { font: { size: 9 }, color: '#7a8194' }, grid: { display: false } },
+          },
+        },
+      });
+    }
+  }
+
+  // ADR-0013：页面不再调用 /api/balance（那是账单/单价接口），重置走专门的本地统计端点。
+  async function resetLocalStats(){
+    if (!window.confirm('确定重置本机统计？会清空网关自己累计的 token、请求数与按模型/按凭据统计；上游积分不受影响。')) return;
+    try{
+      const r = await fetch('/api/local-stats/reset', {
+        method:'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ reset: true }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+      // 用与平时同一个接口重新读，而不是渲染重置回包：
+      // 回包是「部署级」计数，而页面这块显示的是「本 Key」的用量，直接渲染会混用两个口径。
+      await loadUsage(true);
+      await loadDashboard(true);
+    }catch(e){
+      toast('重置本地统计失败：' + e.message);
+    }
+  }
+
+  // ---- chat / streaming (安全 DOM 构造，消除不可信内容注入) ----
+  function addMsg(role, text){
+    const e = $('empty'); if (e) e.remove();
+    const wrap = document.createElement('div');
+    wrap.className = 'row ' + role;
+
+    const av = document.createElement('div');
+    av.className = 'avatar ' + (role === 'user' ? 'user' : 'bot');
+    av.textContent = (role === 'user' ? '我' : 'Ai');
+
+    const col = document.createElement('div');
+    col.style.cssText = 'flex:1;min-width:0';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.setAttribute('data-body', '');
+    bubble.textContent = text || '';
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+
+    col.appendChild(bubble);
+    col.appendChild(meta);
+    wrap.appendChild(av);
+    wrap.appendChild(col);
+
+    $('msgs').appendChild(wrap);
+    $('msgs').scrollTop = $('msgs').scrollHeight;
+    return wrap;
+  }
+
+  async function send(){
+    const input = $('input');
+    const text = input.value.trim();
+    if (!text || state.streaming) return;
+
+    addMsg('user', text);
+    state.messages.push({ role:'user', content:text });
+    input.value = ''; updateTokLive();
+
+    const bot = addMsg('bot', '');
+    const body = bot.querySelector('[data-body]');
+    const meta = bot.querySelector('.meta');
+
+    body.textContent = '';
+    const spanThinking = document.createElement('span');
+    spanThinking.className = 'thinking';
+    spanThinking.textContent = '正在思考';
+    const spanTyping = document.createElement('span');
+    spanTyping.className = 'typing';
+    body.appendChild(spanThinking);
+    body.appendChild(spanTyping);
+
+    state.streaming = true;
+    setConn('busy');
+
+    let acc = '', usage = null;
+    try{
+      const resp = await fetch('/v1/chat/completions', {
+        method:'POST', headers:H,
+        body: JSON.stringify({ model: state.model, messages: state.messages, stream:true })
+      });
+      if (resp.status === 401){ setToken(''); showGate(); throw new Error('密钥已失效，请重新输入'); }
+      if (resp.status === 403){ throw new Error('此凭据无任何账号访问权限'); }
+      if (!resp.ok){ throw new Error('HTTP '+resp.status+' '+(await resp.text())); }
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '', started = false;
+      while(true){
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream:true });
+        let idx;
+        while((idx = buf.indexOf('\n\n')) >= 0){
+          const block = buf.slice(0, idx).trim(); buf = buf.slice(idx+2);
+          if (!block) continue;
+          for (const line of block.split('\n')){
+            if (!line.startsWith('data: ')) continue;
+            const payload = line.slice(6);
+            if (payload === '[DONE]') continue;
+            let obj; try{ obj = JSON.parse(payload); }catch{ continue; }
+            const delta = obj.choices && obj.choices[0] && obj.choices[0].delta && obj.choices[0].delta.content;
+            if (delta){
+              if(!started){ body.textContent = ''; started = true; }
+              acc += delta;
+              body.textContent = acc;
+              $('msgs').scrollTop = $('msgs').scrollHeight;
+            }
+            if (obj.usage) usage = obj.usage;
+          }
+        }
+      }
+      if (!started && acc){ body.textContent = acc; }
+      state.messages.push({ role:'assistant', content: acc });
+      if (usage){
+        meta.textContent = '';
+        const b1 = document.createElement('span'); b1.className = 'badge'; b1.textContent = '入 ' + fmt(usage.prompt_tokens) + ' tok';
+        const b2 = document.createElement('span'); b2.className = 'badge'; b2.textContent = '出 ' + fmt(usage.completion_tokens) + ' tok';
+        const b3 = document.createElement('span'); b3.className = 'badge'; b3.textContent = '共 ' + fmt(usage.total_tokens) + ' tok';
+        meta.appendChild(b1); meta.appendChild(b2); meta.appendChild(b3);
+      }
+      loadUsage();
+      setConn('ok');
+    }catch(e){
+      body.textContent = '⚠️ 出错：' + e.message;
+      meta.textContent = '';
+      setConn('off', '出错');
+    }finally{
+      state.streaming = false;
+    }
+  }
+
+  // ---- ui helpers ----
+  function updateTokLive(){
+    $('tokLive').textContent = '约 ' + estimateTokens($('input').value) + ' tokens';
+  }
+  function setConn(mode, text){
+    const d = $('connDot'), t = $('connText');
+    if (mode==='ok'){ d.className='dot'; t.textContent='就绪'; }
+    else if (mode==='busy'){ d.className='dot'; t.textContent='生成中…'; }
+    else { d.className='dot off'; t.textContent = text||'未连接'; }
+  }
+
+  function resetChatUI(){
+    state.messages = [];
+    const msgsBox = $('msgs');
+    msgsBox.textContent = '';
+    const emptyDiv = document.createElement('div');
+    emptyDiv.className = 'empty';
+    emptyDiv.id = 'empty';
+    const ico = document.createElement('div'); ico.style.fontSize = '40px'; ico.textContent = '💬';
+    const h2 = document.createElement('h2'); h2.textContent = '开始对话';
+    const desc = document.createElement('div'); desc.textContent = '在右侧选择模型，输入问题即可；支持流式输出。';
+    emptyDiv.appendChild(ico); emptyDiv.appendChild(h2); emptyDiv.appendChild(desc);
+    msgsBox.appendChild(emptyDiv);
+    setConn('ok');
+    updateTokLive();
+  }
+
+  // ---- 访问密钥闸门 ----
+  async function testKey(){
+    try{
+      const r = await fetch('/api/models', { headers: H });
+      return r.ok;
+    }catch(e){ return false; }
+  }
+
+  function showGate(){
+    return new Promise((resolve)=>{
+      const gate = $('keyGate'), inp = $('gateInput'), btn = $('gateBtn'), err = $('gateErr');
+      gate.classList.add('open');
+      setTimeout(()=> inp.focus(), 50);
+      async function submit(){
+        const v = inp.value.trim();
+        if (!v){ err.textContent = '请输入密钥'; return; }
+        btn.disabled = true; btn.textContent = '验证中…'; err.textContent = '';
+        setToken(v);
+        if (await testKey()){
+          try{ localStorage.setItem('aw_api_key', v); }catch(e){}
+          gate.classList.remove('open');
+          btn.disabled = false; btn.textContent = '进入';
+          resolve(true);
+        } else {
+          setToken('');
+          btn.disabled = false; btn.textContent = '进入';
+          err.textContent = '密钥无效，请检查后重试';
+          inp.select();
+        }
+      }
+      btn.onclick = submit;
+      inp.addEventListener('keydown', e=>{ if (e.key === 'Enter') submit(); });
+    });
+  }
+
+  async function ensureKey(){
+    if (API_TOKEN && await testKey()) return true;
+    if (API_TOKEN) setToken('');
+    return showGate();
+  }
+
+  // ---- 管理后台管理逻辑 ----
+  // ADR-0012：是否弹口令框取决于「部署者有没有配口令」，不是「当前是否已认证」。
+  // 未配口令时认证失败只可能是访问密钥缺失/失效，弹口令框必然提交失败。
+  async function getAdminSession(){
+    try{
+      const r = await fetch('/api/admin/session', { headers: getAdminHeaders() });
+      const j = await r.json();
+      return { authenticated: Boolean(j.authenticated), configured: Boolean(j.configured) };
+    }catch(e){ return { authenticated: false, configured: false }; }
+  }
+
+  let PENDING_TAB = null;  function showAdminLogin(pendingTab){
+    PENDING_TAB = pendingTab || null;
+    const gate = $('adminLoginGate'), inp = $('adminPwdInput'), btn = $('adminLoginBtn'), err = $('adminLoginErr');
+    gate.classList.add('open');
+    err.textContent = '';
+    inp.value = '';
+    setTimeout(()=> inp.focus(), 50);
+
+    async function submit(){
+      const pwd = inp.value;
+      if (!pwd){ err.textContent = '请输入管理口令'; return; }
+      btn.disabled = true; btn.textContent = '登录中…'; err.textContent = '';
+      try{
+        const r = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd }),
+        });
+        const j = await r.json();
+        if (r.ok && j.ok){
+          setAdminToken(j.token);
+          gate.classList.remove('open');
+          const target = PENDING_TAB;
+          PENDING_TAB = null;
+          if (target) switchTab(target);
+          else await openAdminPanel();
+          if (PENDING_ADD_ACCOUNT){ PENDING_ADD_ACCOUNT = false; $('btnShowAddAccount').click(); }
+          if (PENDING_CREATE_KEY){ PENDING_CREATE_KEY = false; $('btnShowCreateKey').click(); }
+        } else {
+          err.textContent = (j.error && j.error.message) || '口令错误，请重试';
+        }
+      }catch(e){
+        err.textContent = '登录请求失败: ' + e.message;
+      }finally{
+        btn.disabled = false; btn.textContent = '登录';
+      }
+    }
+
+    btn.onclick = submit;
+    inp.onkeydown = e => { if (e.key === 'Enter') submit(); };
+    $('btnCancelAdminLogin').onclick = async () => {
+      PENDING_ADD_ACCOUNT = false;
+      PENDING_CREATE_KEY = false;
+      PENDING_TAB = null;
+      gate.classList.remove('open');
+      // ADR-0012：取消 = 放弃管理权限，不能只关弹窗把会话留着
+      try { await fetch('/api/admin/logout', { method: 'POST', headers: getAdminHeaders() }); } catch(e){}
+      setAdminToken('');
+      $('adminAccountsContainer').textContent = '';
+      $('adminKeysContainer').textContent = '';
+      switchTab('chat');
+    };
+  }
+
+  async function openAdminPanel(knownSession){
+    switchTab('accounts', knownSession);
+  }
+
+  $('btnAdminLogout').onclick = async ()=>{
+    try{
+      await fetch('/api/admin/logout', { method: 'POST', headers: getAdminHeaders() });
+    }catch(e){}
+    setAdminToken('');
+    $('adminSessionNote').textContent = '已退出管理会话';
+    $('adminAccountsContainer').textContent = '';
+    $('adminKeysContainer').textContent = '';
+  };
+
+  // 管理后台：上游账号池运维与设备授权流
+  let pollTimer = null;
+  function clearPollTimer(){
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  $('btnRefreshAccounts').onclick = () => loadAdminAccounts();
+
+  // 批量动作只放真实能力（ADR-0016 §Q8）：刷新积分 = 强制拉一次上游；清冷却 = 逐账号调既有端点。
+  $('btnRefreshCredits').onclick = async () => {
+    const btn = $('btnRefreshCredits');
+    btn.disabled = true;
+    btn.textContent = '刷新中…';
+    try {
+      await loadDashboard(true);
+      await loadAdminAccounts();
+      toast('已刷新全部账号积分');
+    } catch (e) {
+      toast('刷新积分失败：' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '刷新全部积分';
+    }
+  };
+
+  $('btnClearCooldowns').onclick = async () => {
+    const btn = $('btnClearCooldowns');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/admin/accounts', { headers: getAdminHeaders() });
+      const j = await r.json();
+      const cooling = ((j && j.accounts) || []).filter(a => a.in_cooldown);
+      if (!cooling.length) { toast('当前没有处于冷却的账号'); return; }
+      for (const a of cooling) {
+        await fetch(`/api/admin/accounts/${a.id}/cooldown`, {
+          method: 'POST', headers: getAdminHeaders(), body: JSON.stringify({ clear: true }),
+        });
+      }
+      await loadAdminAccounts();
+      toast(`已清除 ${cooling.length} 个账号的冷却`);
+    } catch (e) {
+      toast('清除冷却失败：' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  $('btnShowAddAccount').onclick = () => {
+    clearPollTimer();
+    $('modalAddAccount').classList.add('open');
+    $('paneDeviceLogin').style.display = 'block';
+    $('paneManualImport').style.display = 'none';
+    $('tabDeviceLogin').classList.add('on');
+    $('tabDeviceLogin').classList.remove('ghost');
+    $('tabManualImport').classList.remove('on');
+    $('tabManualImport').classList.add('ghost');
+    $('devLoginActionBox').style.display = 'block';
+    $('devLoginActiveBox').style.display = 'none';
+    $('devLoginErr').textContent = '';
+    $('importAccErr').textContent = '';
+  };
+
+  $('btnCloseAddAccount').onclick = () => {
+    clearPollTimer();
+    $('modalAddAccount').classList.remove('open');
+  };
+
+  $('tabDeviceLogin').onclick = () => {
+    $('paneDeviceLogin').style.display = 'block';
+    $('paneManualImport').style.display = 'none';
+    $('tabDeviceLogin').classList.add('on');
+    $('tabDeviceLogin').classList.remove('ghost');
+    $('tabManualImport').classList.remove('on');
+    $('tabManualImport').classList.add('ghost');
+  };
+
+  $('tabManualImport').onclick = () => {
+    $('paneDeviceLogin').style.display = 'none';
+    $('paneManualImport').style.display = 'block';
+    $('tabManualImport').classList.add('on');
+    $('tabManualImport').classList.remove('ghost');
+    $('tabDeviceLogin').classList.remove('on');
+    $('tabDeviceLogin').classList.add('ghost');
+  };
+
+  // 设备授权流：生成授权链接并轮询
+  $('btnStartDeviceLogin').onclick = async () => {
+    const name = $('devLoginAccName').value.trim();
+    const btn = $('btnStartDeviceLogin');
+    btn.disabled = true; btn.textContent = '请求中…';
+    $('devLoginErr').textContent = '';
+    try {
+      const r = await fetch('/api/admin/accounts/device-login/start', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ name }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) {
+        throw new Error((j.error && j.error.message) || '启动设备授权失败');
+      }
+      $('devUserCode').textContent = j.userCode || j.user_code || '';
+      $('devLoginLink').href = j.verificationUri || j.verification_uri || '#';
+      $('devLoginActionBox').style.display = 'none';
+      $('devLoginActiveBox').style.display = 'block';
+      $('devPollStatus').textContent = '⏳ 等待官方网页授权中 (请点击上方链接确认)...';
+      $('devPollStatus').style.color = 'var(--warn)';
+
+      // 启动轮询
+      const sessId = j.sessionId || j.session_id;
+      clearPollTimer();
+      pollTimer = setInterval(async () => {
+        try {
+          const pr = await fetch(`/api/admin/accounts/device-login/poll?session_id=${sessId}`, {
+            headers: getAdminHeaders(),
+          });
+          const pj = await pr.json();
+          if (pj.status === 'confirmed') {
+            clearPollTimer();
+            $('devPollStatus').textContent = '✓ 授权成功！账号已自动加入账号池';
+            $('devPollStatus').style.color = 'var(--ok)';
+            setTimeout(() => {
+              $('modalAddAccount').classList.remove('open');
+              loadAdminAccounts();
+            }, 1200);
+          } else if (pj.status === 'expired') {
+            clearPollTimer();
+            $('devPollStatus').textContent = '✕ 授权会话已超时，请重新生成';
+            $('devPollStatus').style.color = 'var(--danger)';
+          } else if (pj.status === 'error') {
+            clearPollTimer();
+            $('devPollStatus').textContent = '✕ ' + (pj.message || '凭据换票失败，请改用手动粘贴 Router Key 导入');
+            $('devPollStatus').style.color = 'var(--danger)';
+          }
+        } catch (_) {}
+      }, 2500);
+    } catch (e) {
+      $('devLoginErr').textContent = e.message;
+    } finally {
+      btn.disabled = false; btn.textContent = '生成官方授权';
+    }
+  };
+
+  // 手动导入动态账号
+  $('btnCancelImportAccount').onclick = () => {
+    $('modalAddAccount').classList.remove('open');
+  };
+
+  $('btnDoImportAccount').onclick = async () => {
+    const name = $('importAccName').value.trim();
+    const routerKey = $('importRouterKey').value.trim();
+    const userId = $('importUserId').value.trim();
+    const err = $('importAccErr');
+    if (!name) { err.textContent = '请输入账号备注名'; return; }
+    if (!routerKey) { err.textContent = '请输入官方 Router Key'; return; }
+    err.textContent = '';
+    const btn = $('btnDoImportAccount');
+    btn.disabled = true; btn.textContent = '导入中…';
+    try {
+      const r = await fetch('/api/admin/accounts/import', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ name, routerKey, userId }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) {
+        throw new Error((j.error && j.error.message) || '导入失败');
+      }
+      $('modalAddAccount').classList.remove('open');
+      await loadAdminAccounts();
+    } catch (e) {
+      err.textContent = e.message;
+    } finally {
+      btn.disabled = false; btn.textContent = '确认导入';
+    }
+  };
+
+  // knownSession：TAB 切换路径已经查过管理会话，直接复用，别为同一次点击再请求一次。
+  async function loadAdminAccounts(knownSession){
+    // ADR-0012：未启用管理口令时「管理会话」没有可操作内容，整块隐藏，避免留下一个空壳横幅。
+    const adminState = knownSession || await getAdminSession();
+    $('adminSessionSection').style.display = adminState.configured ? '' : 'none';
+    // 两个方向都要写：只写「已登录」的话，会话过期或退出后横幅会一直停在旧状态。
+    $('adminSessionNote').textContent = adminState.authenticated
+      ? '管理会话已登录，可直接修改账号与凭据。'
+      : '需要管理口令才能修改账号与凭据。';
+
+    const container = $('adminAccountsContainer');
+    container.textContent = '加载账号池…';
+    try {
+      // 账号列表给状态与指标；积分仍以仪表盘为唯一来源（ADR-0011），两个请求并行。
+      const [accRes, dashRes] = await Promise.all([
+        fetch('/api/admin/accounts', { headers: getAdminHeaders() }),
+        fetch('/api/dashboard', { headers: getAdminHeaders(), cache: 'no-store' }),
+      ]);
+      const accData = await accRes.json();
+      const dashData = await dashRes.json().catch(() => null);
+      const accounts = (accData && accData.accounts) || [];
+      const credits = (dashData && dashData.credits && dashData.credits.accounts) || {};
+      renderAdminAccounts(accounts, credits);
+    } catch (e) {
+      container.textContent = '加载账号列表失败: ' + e.message;
+    }
+  }
+
+  function fmtTok(n){
+    const v = Number(n) || 0;
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'm';
+    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'k';
+    return String(v);
+  }
+
+  // 归档占用：字节数按人读的单位显示，日期只留 MM-DD
+  function fmtBytes(n){
+    const v = Number(n) || 0;
+    if (v >= 1024 * 1024 * 1024) return (v / 1024 / 1024 / 1024).toFixed(1) + ' GB';
+    if (v >= 1024 * 1024) return (v / 1024 / 1024).toFixed(1) + ' MB';
+    if (v >= 1024) return (v / 1024).toFixed(1) + ' KB';
+    return v + ' B';
+  }
+
+  function fmtDay(day){
+    const m = /^\d{4}-(\d{2}-\d{2})$/.exec(String(day || ''));
+    return m ? m[1] : '—';
+  }
+
+  function statusOfAccount(acc){
+    if (!acc.enabled) return { cls: 'off', text: '已禁用' };
+    if (acc.status === 'credentials_missing') return { cls: 'err', text: '凭据缺失' };
+    if (acc.status === 'needs_reauth') return { cls: 'err', text: '需重新授权' };
+    if (acc.in_cooldown) return { cls: 'warn', text: `冷却 ${acc.cooldown_remaining_sec}s` };
+    if (acc.paused) return { cls: 'pause', text: '暂停选号' };
+    if (acc.ready) return { cls: 'ok', text: '就绪' };
+    return { cls: 'off', text: acc.status || '未知' };
+  }
+
+  function renderAdminAccounts(accounts, creditsById){
+    const container = $('adminAccountsContainer');
+    container.textContent = '';
+    if (!accounts.length){
+      const empty = document.createElement('div');
+      empty.className = 'note';
+      empty.textContent = '暂无上游账号，点击上方按钮接入官方账号。';
+      container.appendChild(empty);
+      return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'acct-table';
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    ['账号', '状态', '积分', '成功 / 失败', '在途', '用量', '最近成功', '操作'].forEach((label, i) => {
+      const th = document.createElement('th');
+      th.textContent = label;
+      if (i === 7) th.className = 'ta-r';
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    const reload = () => loadAdminAccounts();
+
+    accounts.forEach(acc => {
+      const st = statusOfAccount(acc);
+      const u = acc.usage || {};
+      const c = (creditsById && creditsById[acc.id]) || null;
+      const tr = document.createElement('tr');
+      tr.dataset.accountId = acc.id;
+      if (!acc.enabled) tr.className = 'row-off';
+
+      // 1. 账号：名称（动态账号可改名）+ 标识与模型数
+      const tdName = document.createElement('td');
+      const nm = document.createElement('div');
+      nm.className = 'acct-name';
+      nm.textContent = acc.name || acc.id;
+      if (acc.source === 'dynamic'){
+        const btnRename = document.createElement('button');
+        btnRename.className = 'link-btn';
+        btnRename.type = 'button';
+        btnRename.textContent = '改名';
+        btnRename.setAttribute('aria-label', `修改 ${acc.name || acc.id} 的展示名称`);
+        btnRename.onclick = async () => {
+          const newName = prompt('输入新展示名称:', acc.name || acc.id);
+          if (!newName || !newName.trim() || newName.trim() === acc.name) return;
+          await fetch(`/api/admin/accounts/${acc.id}`, {
+            method: 'PATCH', headers: getAdminHeaders(),
+            body: JSON.stringify({ name: newName.trim() }),
+          });
+          await reload();
+        };
+        nm.appendChild(document.createTextNode(' '));
+        nm.appendChild(btnRename);
+      }
+      const sub = document.createElement('div');
+      sub.className = 'acct-sub';
+      sub.textContent = `${acc.source === 'dynamic' ? '动态' : '挂载'} · ${acc.modelsCount || 0} 模型 · ${acc.id}`;
+      tdName.appendChild(nm);
+      tdName.appendChild(sub);
+      tr.appendChild(tdName);
+
+      // 2. 状态
+      const tdStatus = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'acct-badge ' + st.cls;
+      badge.textContent = st.text;
+      tdStatus.appendChild(badge);
+      tr.appendChild(tdStatus);
+
+      // 3. 积分：剩余 / 总额（ADR-0016 §Q4），已用与到期日进 title
+      const tdCredits = document.createElement('td');
+      tdCredits.className = 'num';
+      if (c && c.ok !== false && (c.total || c.remaining)){
+        tdCredits.textContent = `${fmt(c.remaining)} / ${fmt(c.total)}`;
+        tdCredits.title = `已用 ${fmt(c.used)} · 套餐 ${c.plan_name || '—'} · 到期 ${c.expire_at || '—'}`;
+      } else {
+        tdCredits.textContent = '—';
+        tdCredits.title = (c && c.error) || '暂无积分数据，点「刷新全部积分」';
+      }
+      tr.appendChild(tdCredits);
+
+      // 4. 成功 / 失败（按尝试计）
+      const tdSF = document.createElement('td');
+      tdSF.className = 'num';
+      const okSpan = document.createElement('span');
+      okSpan.textContent = fmt(u.success || 0);
+      const sep = document.createTextNode(' / ');
+      const errSpan = document.createElement('span');
+      errSpan.textContent = fmt(u.errors || 0);
+      if (u.errors > 0) errSpan.className = 'err-num';
+      tdSF.appendChild(okSpan); tdSF.appendChild(sep); tdSF.appendChild(errSpan);
+      tdSF.title = '按请求尝试计：换号前的失败记在原账号，成功记在新账号';
+      tr.appendChild(tdSF);
+
+      // 5. 在途
+      const tdInflight = document.createElement('td');
+      tdInflight.className = 'num';
+      tdInflight.textContent = String(acc.active_requests || 0);
+      tr.appendChild(tdInflight);
+
+      // 6. 用量：次数与累计 token，延迟与 tok/s 取最近一次（失败则 —）
+      // 同时是去用量页的入口：点进去只看这个账号、时间范围近 7 天。
+      const tdUsage = document.createElement('td');
+      tdUsage.className = 'usage-cell';
+      const usageLink = document.createElement('button');
+      usageLink.type = 'button';
+      usageLink.className = 'usage-link';
+      usageLink.dataset.account = acc.id;
+      usageLink.title = '查看这个账号近 7 天的用量';
+      const line1 = document.createElement('span');
+      line1.textContent = `${fmt(u.requests || 0)} 次 · ${fmtTok(u.tokens || 0)} tok`;
+      const line2 = document.createElement('span');
+      line2.className = 'acct-sub';
+      const lat = (u.last_latency_ms == null) ? '—' : (u.last_latency_ms / 1000).toFixed(1) + 's';
+      const tps = (u.last_tok_per_sec == null) ? '—' : u.last_tok_per_sec + ' tok/s';
+      line2.textContent = `${lat} · ${tps}`;
+      usageLink.appendChild(line1);
+      usageLink.appendChild(line2);
+      usageLink.onclick = () => openUsageForAccount(acc.id, acc.name || acc.id);
+      tdUsage.appendChild(usageLink);
+      tr.appendChild(tdUsage);
+
+      // 7. 最近成功
+      const tdLast = document.createElement('td');
+      tdLast.className = 'num';
+      tdLast.textContent = u.last_success_at ? ago(u.last_success_at) : '—';
+      if (u.last_success_at) tdLast.title = new Date(u.last_success_at).toLocaleString('zh-CN', { hour12: false });
+      tr.appendChild(tdLast);
+
+      // 8. 操作
+      const tdActions = document.createElement('td');
+      tdActions.className = 'ta-r';
+      const act = document.createElement('div');
+      act.className = 'acct-actions';
+
+      const mkBtn = (text, onClick, opts = {}) => {
+        const b = document.createElement('button');
+        b.className = 'sm' + (opts.danger ? ' danger' : '');
+        b.type = 'button';
+        b.textContent = text;
+        if (opts.title) b.title = opts.title;
+        b.onclick = onClick;
+        return b;
+      };
+      const patch = async (body) => {
+        await fetch(`/api/admin/accounts/${acc.id}`, {
+          method: 'PATCH', headers: getAdminHeaders(), body: JSON.stringify(body),
+        });
+        await reload();
+      };
+
+      if (acc.source === 'dynamic'){
+        // 行内刷新只打这一个账号的上游；其余账号继续用各自缓存（批量刷新才用工具条那个按钮）。
+        act.appendChild(mkBtn('余额刷新', async () => {
+          try {
+            const r = await fetch(`/api/admin/accounts/${acc.id}/credits`, { method: 'POST', headers: getAdminHeaders() });
+            const j = await r.json().catch(() => null);
+            if (!r.ok || !j || !j.ok) throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+            toast(`已刷新 ${acc.name || acc.id} 的余额`);
+          } catch (e) {
+            toast('余额刷新失败：' + e.message);
+          }
+          await reload();
+        }, { title: '只重新读取这个账号的余额/积分，不影响其他账号' }));
+        if (acc.enabled){
+          act.appendChild(mkBtn(acc.paused ? '恢复' : '暂停选号', () => patch({ paused: !acc.paused }),
+            { title: '暂停选号：不再接新会话，已绑定的会话继续用这个号' }));
+          act.appendChild(mkBtn('禁用', () => patch({ enabled: false }), { danger: true, title: '禁用：立即退出选号并释放绑定' }));
+        } else {
+          act.appendChild(mkBtn('启用', () => patch({ enabled: true })));
+        }
+        act.appendChild(mkBtn('移除', async () => {
+          if (!confirm(`确认移除账号 "${acc.name || acc.id}" 吗？本地凭据会被删除。`)) return;
+          await fetch(`/api/admin/accounts/${acc.id}`, { method: 'DELETE', headers: getAdminHeaders() });
+          await reload();
+        }, { danger: true }));
+      } else {
+        const note = document.createElement('span');
+        note.className = 'acct-sub';
+        note.textContent = '只读挂载，受保护';
+        act.appendChild(note);
+      }
+      tdActions.appendChild(act);
+      tr.appendChild(tdActions);
+
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+
+  // 管理后台：调用凭据 CRUD
+  $('btnRefreshKeys').onclick = () => loadAdminKeys();
+
+  $('btnShowCreateKey').onclick = () => {
+    const box = $('createKeyBox');
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    $('createKeyErr').textContent = '';
+  };
+  $('btnCancelCreateKey').onclick = () => { $('createKeyBox').style.display = 'none'; };
+
+  document.querySelectorAll('input[name="newKeyPolicy"]').forEach(r => {
+    r.addEventListener('change', () => {
+      $('newKeyAccounts').style.display = (r.value === 'explicit' && r.checked) ? 'block' : 'none';
+    });
+  });
+
+  $('btnDoCreateKey').onclick = async () => {
+    const name = $('newKeyName').value.trim();
+    const token = $('newKeyToken').value.trim();
+    const mode = document.querySelector('input[name="newKeyPolicy"]:checked').value;
+    const accounts = mode === 'explicit'
+      ? $('newKeyAccounts').value.split(/[,，\s]+/).map(s=>s.trim()).filter(Boolean)
+      : [];
+
+    const btn = $('btnDoCreateKey');
+    btn.disabled = true;
+    try{
+      const r = await fetch('/api/admin/keys', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ name, token: token || undefined, account_policy: { mode, accounts } }),
+      });
+      const j = await r.json();
+      if (r.ok && j.ok){
+        $('createKeyBox').style.display = 'none';
+        $('newKeyName').value = '';
+        $('newKeyToken').value = '';
+        $('newKeyAccounts').value = '';
+        await loadAdminKeys();
+      } else {
+        $('createKeyErr').textContent = (j.error && j.error.message) || '创建凭据失败';
+      }
+    }catch(e){
+      $('createKeyErr').textContent = '请求失败: ' + e.message;
+    }finally{
+      btn.disabled = false;
+    }
+  };
+
+  async function loadAdminKeys(){
+    const container = $('adminKeysContainer');
+    try{
+      const r = await fetch('/api/admin/keys', { headers: getAdminHeaders() });
+      if (r.status === 401 || r.status === 403){
+        setAdminToken('');
+        closePanels();
+        showAdminLogin();
+        return;
+      }
+      const j = await r.json();
+      const keys = j.keys || [];
+      renderAdminKeys(keys);
+    }catch(e){
+      container.textContent = '加载调用凭据列表失败: ' + e.message;
+    }
+  }
+
+  function renderAdminKeys(keys){
+    const container = $('adminKeysContainer');
+    container.textContent = '';
+    if (!keys.length){
+      const empty = document.createElement('div');
+      empty.className = 'note';
+      empty.textContent = '暂无调用凭据，点击上方按钮新增。';
+      container.appendChild(empty);
+      return;
+    }
+
+    keys.forEach(k => container.appendChild(renderKeyCard(k)));
+  }
+
+  // 行构造：左标签 / 中值 / 右操作位，返回一整行。value 可传字符串，也可传节点或文档片段
+  // （需要就地切换内容的元素放这里）。操作位是一个独立的空容器节点。
+  // 后续票据通过 addKeyRowAction(row, btn) 往该行右侧的操作位加按钮，row 由 keyRow(标签, 值) 生成；
+  // 一次只改自己那一行的值或按钮，不要调整行的顺序，也不要改 keyRow 的结构。
+  function keyRow(labelText, value){
+    const row = document.createElement('div');
+    row.className = 'key-row';
+
+    const label = document.createElement('span');
+    label.className = 'key-row-label';
+    label.textContent = labelText;
+
+    const val = document.createElement('span');
+    val.className = 'key-row-value';
+    if (value && value.nodeType){
+      val.appendChild(value);
+    } else {
+      val.textContent = value == null ? '' : String(value);
+    }
+
+    const ops = document.createElement('span');
+    ops.className = 'key-row-ops';
+
+    row.appendChild(label);
+    row.appendChild(val);
+    row.appendChild(ops);
+    return row;
+  }
+
+  // 往某一行右侧的操作位追加一个节点（通常是按钮），返回操作位便于连续追加。
+  function addKeyRowAction(row, node){
+    const ops = row.querySelector('.key-row-ops');
+    if (ops && node) ops.appendChild(node);
+    return ops;
+  }
+
+  // ---- 接口地址行：复制入口 + 本机地址口径提示 ----
+  // 接口地址是部署级派生值（当前访问地址 + /v1），复制出去的永远是这一串，提示只补口径、不改值。
+  // 提示的触发条件：页面本身是用回环地址打开的，而网关 bind_address 的主机部分不是回环地址——
+  // 这时 location.origin 拼出来的地址对局域网或远端客户端不可用，得换成实际监听地址。
+  // 设置只读一次，多张卡共用；读不到或字段缺失就当没有，不提示也不影响复制。
+  let bindAddressMemo = null;
+
+  function isLoopbackHost(host){
+    const h = String(host == null ? '' : host).trim().toLowerCase()
+      .replace(/^\[/, '').replace(/\]$/, '');
+    return h === '127.0.0.1' || h === 'localhost' || h === '::1';
+  }
+
+  // bind_address 是 host[:port]，端口可省略。方括号包住的 IPv6、裸 IPv6 都不能按最后一个冒号切。
+  function splitBindHost(value){
+    const raw = String(value == null ? '' : value).trim();
+    if (!raw) return '';
+    if (raw.charAt(0) === '['){
+      const end = raw.indexOf(']');
+      return end > 0 ? raw.slice(1, end) : raw;
+    }
+    if ((raw.match(/:/g) || []).length > 1) return raw;   // 裸 IPv6，没有端口
+    const i = raw.lastIndexOf(':');
+    return i < 0 ? raw : raw.slice(0, i);
+  }
+
+  function splitBindPort(value){
+    const raw = String(value == null ? '' : value).trim();
+    if (raw.charAt(0) === '['){
+      const end = raw.indexOf(']');
+      return (end > 0 && raw.charAt(end + 1) === ':') ? raw.slice(end + 2) : '';
+    }
+    if ((raw.match(/:/g) || []).length > 1) return '';
+    const i = raw.lastIndexOf(':');
+    return i < 0 ? '' : raw.slice(i + 1);
+  }
+
+  // 要说清「换成哪个地址」就得带端口：配置里写了端口用它，没写就用当前访问端口，
+  // 不把任何端口写死进文案。IPv6 主机用方括号包回去，否则主机和端口分不清。
+  function listeningAddressLabel(bind){
+    const raw = String(bind == null ? '' : bind).trim();
+    const host = splitBindHost(raw);
+    if (!host) return '';
+    const here = typeof location !== 'undefined' && location.port ? String(location.port) : '';
+    const port = splitBindPort(raw) || here;
+    const shownHost = host.indexOf(':') > -1 ? '[' + host + ']' : host;
+    return port ? shownHost + ':' + port : shownHost;
+  }
+
+  function shouldHintLocalOnly(pageHost, bind){
+    if (!isLoopbackHost(pageHost)) return false;
+    const host = splitBindHost(bind);
+    if (!host) return false;
+    return !isLoopbackHost(host);
+  }
+
+  function loadBindAddress(){
+    if (bindAddressMemo) return bindAddressMemo;
+    bindAddressMemo = fetch('/api/settings', { headers: getAdminHeaders(), cache: 'no-store' })
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((j) => (j && j.settings && typeof j.settings.bind_address === 'string' ? j.settings.bind_address : ''))
+      .catch(() => '');
+    return bindAddressMemo;
+  }
+
+  // 接口地址行的全部接线都在这里，renderKeyCard 只留一行调用。
+  function attachBaseUrlRow(row){
+    const baseUrl = location.origin + '/v1';
+
+    const btnCopy = document.createElement('button');
+    btnCopy.type = 'button';
+    btnCopy.className = 'sm';
+    btnCopy.textContent = '复制';
+    btnCopy.setAttribute('aria-label', '复制接口地址');
+    btnCopy.onclick = async () => {
+      const ok = await copyText(baseUrl);
+      toast(ok ? '接口地址已复制' : '复制失败，请手动选中接口地址复制');
+    };
+    addKeyRowAction(row, btnCopy);
+
+    // 从局域网 IP 或域名打开时这个地址本来就是通的，连设置都不用读。
+    if (!isLoopbackHost(location.hostname)) return;
+    loadBindAddress().then((bind) => {
+      if (!shouldHintLocalOnly(location.hostname, bind)) return;
+      const hint = document.createElement('div');
+      hint.className = 'key-row-hint';
+      const bindHost = splitBindHost(bind);
+      // 0.0.0.0 / :: 是「监听所有网卡」，它自己不是能连的地址：写成「换成 0.0.0.0:8080」
+      // 等于让人去填一个任何客户端都连不上的主机名。这种情况只说清端口，让人填本机局域网 IP。
+      const wildcard = !bindHost || bindHost === '0.0.0.0' || bindHost === '::';
+      if (wildcard){
+        const port = splitBindPort(bind) || (location.port ? String(location.port) : '');
+        hint.textContent = '这个地址只在本机可用；网关监听在所有网卡'
+          + (port ? '（端口 ' + port + '）' : '')
+          + '，局域网或远端客户端请填这台机器的局域网 IP。';
+      } else {
+        hint.textContent = '这个地址只在本机可用；局域网或远端客户端要把主机名换成实际监听地址（'
+          + listeningAddressLabel(bind) + '）。';
+      }
+      row.appendChild(hint);
+    });
+  }
+
+  // 模型行：渲染时只占位，点「复制」才用这把凭据自己的 token 读一次 /v1/models。
+  // 清单按该凭据的账号范围由服务端过滤，不是全站并集；读到后缓存在这张卡上，
+  // 重复点复制只重写剪贴板，不再发请求（列表页一开就每卡打一次是这张票要避免的）。
+  // 读失败只把这一行降级成「读取失败」，不缓存失败，下次点击可重试。
+  function attachModelRow(row, k){
+    const valEl = row.querySelector('.key-row-value');
+    const opsEl = row.querySelector('.key-row-ops');
+    if (!valEl || !opsEl) return;
+
+    let models = null;    // 读到后的清单；null 表示还没读过（空数组也算读过）
+    let inflight = null;  // 并发点按共用同一次请求，别让连点发出两次
+
+    const btnCopy = document.createElement('button');
+    btnCopy.type = 'button';
+    btnCopy.className = 'sm';
+    btnCopy.textContent = '复制';
+    btnCopy.setAttribute('aria-label', '复制模型清单');
+
+    // 空集合的凭据能复制，但接上去调不通：这话只有读到模型时才知道，所以这时才加到卡片上。
+    function explainUnreachable(){
+      const card = row.parentNode;
+      if (!card || card.querySelector('.key-models-note')) return;
+      const note = document.createElement('div');
+      note.className = 'note key-models-note';
+      note.textContent = '这份配置没有可用模型，接上去调不通：先把账号范围改成指定账号或全部账号。';
+      card.appendChild(note);
+    }
+
+    function loadModels(){
+      if (inflight) return inflight;
+      valEl.textContent = '读取中…';
+      btnCopy.disabled = true;
+      inflight = fetchKeyModels(k.id).then((list) => {
+        models = Array.isArray(list) ? list : [];
+        return models;
+      }).finally(() => {
+        inflight = null;
+        btnCopy.disabled = false;
+      });
+      return inflight;
+    }
+
+    btnCopy.onclick = async () => {
+      if (models === null){
+        try{
+          await loadModels();
+        }catch(e){
+          valEl.textContent = '读取失败';
+          toast('读取模型列表失败：' + ((e && e.message) || e));
+          return;
+        }
+      }
+      if (!models.length){
+        valEl.textContent = '无可用模型';
+        // 没东西可复制就别留一个点了没反应的按钮。
+        if (btnCopy.parentNode) btnCopy.parentNode.removeChild(btnCopy);
+        explainUnreachable();
+        toast('这份配置没有可用模型，接上去调不通');
+        return;
+      }
+      valEl.textContent = models.length + ' 个可用';
+      // 一行一个模型名，可直接粘进客户端的模型输入框；不要引号、不要逗号。
+      const ok = await copyText(models.join('\n'));
+      toast(ok ? ('已复制 ' + models.length + ' 个模型名') : '复制失败，请手动选中文本复制');
+    };
+
+    addKeyRowAction(row, btnCopy);
+  }
+
+  // ---- 接入配置复制：格式档 ----
+  // 新增一档只需往下面这张表 push 一项 { id, label, format(ctx) }，不要改按钮、下拉或预览逻辑：
+  // 下拉选项由格式表生成，复制与预览都是「取当前格式项 → format(ctx)」。
+  // ctx 的字段：keyName / baseUrl（已带 /v1）/ apiKey（真值）/ model / models。
+  const COPY_FORMATS = [
+    {
+      id: 'json',
+      label: 'JSON',
+      format(ctx){
+        const payload = {
+          provider: 'aiwork',
+          key_name: ctx.keyName,
+          base_url: ctx.baseUrl,
+          api_key: ctx.apiKey,
+          model: ctx.model,
+          models: Array.isArray(ctx.models) ? ctx.models.slice() : [],
+          // 端点都是部署级派生值，只给三条相对路径，客户端自己拼 base_url。
+          endpoints: {
+            chat_completions: '/v1/chat/completions',
+            responses: '/v1/responses',
+            messages: '/v1/messages',
+          },
+        };
+        // 不做任何中文转义：中文与多行在 JSON 字符串里本来就合法，转义只会让粘贴出来不可读。
+        return JSON.stringify(payload, null, 2);
+      },
+    },
+  ];
+
+  // ENV 档：OpenAI 套可直接 source；Claude Code 那套整段注释掉，按需取消。
+  // 两个坑写死在这里：ANTHROPIC_BASE_URL 不带 /v1，否则客户端会拼成 /v1/v1/messages；
+  // 变量名是 ANTHROPIC_AUTH_TOKEN，Claude Code 不认 ANTHROPIC_API_KEY。
+  COPY_FORMATS.push({
+    id: 'env',
+    label: 'ENV',
+    format(ctx){
+      // ctx.baseUrl 已带 /v1，Anthropic 要的是根地址，掐掉尾部 /v1 得到。
+      const anthropicBase = String(ctx.baseUrl || '').replace(/\/v1\/?$/, '');
+      const model = ctx.model == null ? '' : String(ctx.model);
+      return [
+        '# OpenAI 兼容客户端：把下面三行导入环境变量即可',
+        'OPENAI_BASE_URL=' + ctx.baseUrl,
+        'OPENAI_API_KEY=' + ctx.apiKey,
+        'OPENAI_MODEL=' + model,
+        '',
+        '# Claude Code（Anthropic 兼容）：下面整段注释，需要时取消注释',
+        '# 注意：ANTHROPIC_BASE_URL 不带 /v1，变量名是 AUTH_TOKEN 不是 API_KEY',
+        '# ANTHROPIC_BASE_URL=' + anthropicBase,
+        '# ANTHROPIC_AUTH_TOKEN=' + ctx.apiKey,
+        '# ANTHROPIC_MODEL=' + model,
+      ].join('\n');
+    },
+  });
+
+  // curl 档：一条能直接粘进终端的命令。baseUrl 已带 /v1，只补 /chat/completions。
+  COPY_FORMATS.push({
+    id: 'curl',
+    label: 'curl',
+    format(ctx){
+      const c = ctx || {};
+      // messages 里放一句中文示例：JSON 与多字节字符在 shell 单引号里本来就安全，不做额外转义。
+      const body = JSON.stringify({
+        model: c.model == null ? '' : String(c.model),
+        messages: [{ role: 'user', content: '你好' }],
+      });
+      // 请求体包在单引号里：JSON 里一旦出现单引号就会提前闭合引号，必须断成 '\'' 再续上。
+      const quotedBody = "'" + body.replace(/'/g, "'\\''") + "'";
+      // key 在双引号里，只转义会打断 shell 的四个字符；普通 key 的输出与 README 示例一致。
+      const key = c.apiKey == null ? '' : String(c.apiKey).replace(/(["\\$`])/g, '\\$1');
+      return 'curl -s ' + (c.baseUrl || '') + '/chat/completions \\\n'
+        + '  -H "Authorization: Bearer ' + key + '" -H "Content-Type: application/json" \\\n'
+        + '  -d ' + quotedBody;
+    },
+  });
+
+  const COPY_FORMAT_STORAGE_KEY = 'aw_copy_fmt';
+
+  function formatById(id){
+    for (let i = 0; i < COPY_FORMATS.length; i++){
+      if (COPY_FORMATS[i].id === id) return COPY_FORMATS[i];
+    }
+    return COPY_FORMATS[0];
+  }
+
+  function saveFormatChoice(id){
+    try{ localStorage.setItem(COPY_FORMAT_STORAGE_KEY, String(id)); }catch(e){}
+  }
+
+  // 刷新后保持上次选择；存的是个不认识的 id（旧版本残留）时回落到默认档，别让下拉变空。
+  function loadFormatChoice(){
+    let saved = '';
+    try{ saved = localStorage.getItem(COPY_FORMAT_STORAGE_KEY) || ''; }catch(e){}
+    return formatById(saved).id;
+  }
+
+  // 模型：回落模型优先；它不在该凭据能调的清单里就取清单第一个；清单为空退回 automodel
+  // （automodel 跑单轮够用，只是多轮工具调用不可用，总比给个空字符串强）。
+  function pickModel(fallbackModel, models){
+    const list = Array.isArray(models) ? models.filter(Boolean) : [];
+    const want = fallbackModel == null ? '' : String(fallbackModel).trim();
+    if (want && list.indexOf(want) !== -1) return want;
+    if (list.length) return list[0];
+    return 'automodel';
+  }
+
+  // 预览用的掩码：留首 6 末 4，中段整段省略；长度不足以同时留首尾时只留前 3 位，
+  // 保证至少藏住 2 位——不能让 9–11 位的 key 被首尾两段拼回整串。
+  function maskKey(key){
+    const v = key == null ? '' : String(key);
+    if (!v) return '';
+    const head = 6, tail = 4;
+    if (v.length <= head + tail + 1) return v.slice(0, 3) + '…';
+    return v.slice(0, head) + '…' + v.slice(-tail);
+  }
+
+  // 预览专用 ctx：除了 key 换成掩码，其它字段与复制路径完全一致，输出不会两种形态。
+  function maskContext(ctx){
+    return {
+      keyName: ctx.keyName,
+      baseUrl: ctx.baseUrl,
+      apiKey: maskKey(ctx.apiKey),
+      model: ctx.model,
+      models: ctx.models,
+    };
+  }
+
+  // 当前回落模型：设置页用的 /api/fallback 里 current 就是「实际回落」。
+  // 读不到不算失败——退回模型清单第一个即可，不该因为设置接口挂了就复制不出配置。
+  async function fetchFallbackModel(){
+    try{
+      const r = await fetch('/api/fallback', { headers: getAdminHeaders(), cache: 'no-store' });
+      if (!r.ok) return '';
+      const j = await r.json().catch(() => null);
+      return j && j.current ? String(j.current) : '';
+    }catch(e){
+      return '';
+    }
+  }
+
+  // 组装一次复制/预览用的 ctx：明文只取一次，模型复用同一份明文；明文不缓存。
+  // 任一取值失败都往外抛，由调用方报失败——不允许产出半份配置。
+  async function buildConfigContext(k){
+    const apiKey = await fetchKeyToken(k.id);
+    const [models, fallbackModel] = await Promise.all([
+      fetchKeyModels(k.id, apiKey),
+      fetchFallbackModel(),
+    ]);
+    return {
+      keyName: k.name || k.id,
+      baseUrl: location.origin + '/v1',
+      apiKey: apiKey,
+      model: pickModel(fallbackModel, models),
+      models: Array.isArray(models) ? models.slice() : [],
+    };
+  }
+
+  // 卡片操作区里的复制入口：按钮 + 格式下拉 + 可折叠预览。
+  // 只在 renderKeyCard 里被调一行，行结构与其它按钮都不动。
+  function addConfigCopyControls(actions, k){
+    const wrap = document.createElement('span');
+    wrap.className = 'key-cfg-wrap';
+
+    const sel = document.createElement('select');
+    sel.className = 'key-cfg-select';
+    sel.setAttribute('aria-label', '接入配置格式');
+    // 下拉完全由格式表生成：新增一档只 push 一项，这里不用动。
+    COPY_FORMATS.forEach((f) => {
+      const opt = document.createElement('option');
+      opt.value = f.id;
+      opt.textContent = f.label;
+      sel.appendChild(opt);
+    });
+    sel.value = loadFormatChoice();
+
+    const btnCopy = document.createElement('button');
+    btnCopy.type = 'button';
+    btnCopy.className = 'sm';
+    btnCopy.textContent = '复制接入配置';
+
+    const btnPreview = document.createElement('button');
+    btnPreview.type = 'button';
+    btnPreview.className = 'sm key-cfg-toggle';
+    btnPreview.textContent = '预览';
+    btnPreview.setAttribute('aria-expanded', 'false');
+
+    const pre = document.createElement('pre');
+    pre.className = 'key-cfg-preview';
+    pre.hidden = true;
+
+    let expanded = false;
+
+    // 预览渲染：把掩码后的 ctx 交给同一个 format，输出形态与剪贴板一致，只有 key 不同。
+    // 折叠时清空内容（不是只藏起来），展开失败也只显示失败原因，绝不回退到真值。
+    async function renderPreview(){
+      if (!expanded){ pre.textContent = ''; pre.hidden = true; return; }
+      pre.hidden = false;
+      pre.textContent = '读取中…';
+      try{
+        const ctx = await buildConfigContext(k);
+        pre.textContent = formatById(sel.value).format(maskContext(ctx));
+      }catch(e){
+        pre.textContent = '读取失败：' + e.message;
+      }
+    }
+
+    btnPreview.onclick = async () => {
+      expanded = !expanded;
+      btnPreview.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      btnPreview.textContent = expanded ? '收起预览' : '预览';
+      await renderPreview();
+    };
+
+    sel.onchange = async () => {
+      saveFormatChoice(sel.value);
+      if (expanded) await renderPreview();
+    };
+
+    btnCopy.onclick = async () => {
+      const label = btnCopy.textContent;
+      btnCopy.disabled = true;
+      btnCopy.textContent = '生成中';
+      try{
+        const ctx = await buildConfigContext(k);
+        const fmt = formatById(sel.value);
+        // 剪贴板里是真值；预览那条路径才是掩码。
+        const ok = await copyText(fmt.format(ctx));
+        if (!ok) throw new Error('剪贴板不可用');
+        // 没有可用模型时配置照样复制成功，但要把话说全：接上去调不通。
+        const caveat = ctx.models.length ? '' : '，但这份配置没有可用模型，接上去调不通';
+        toast('已复制 ' + fmt.label + ' 接入配置（含明文 Key）' + caveat);
+      }catch(e){
+        // 取明文/取模型失败会落到这里：宁可不给，也不给半份配置。
+        toast('复制接入配置失败：' + e.message);
+      }finally{
+        btnCopy.disabled = k.revoked;
+        btnCopy.textContent = label;
+      }
+    };
+
+    wrap.appendChild(btnCopy);
+    wrap.appendChild(sel);
+    wrap.appendChild(btnPreview);
+    if (k.revoked){
+      // 已撤销的凭据接上去也调不通：禁用按钮，并在旁边说明原因。
+      btnCopy.disabled = true;
+      btnCopy.title = '凭据已撤销，无法复制接入配置';
+      const hint = document.createElement('span');
+      hint.className = 'key-cfg-hint';
+      hint.textContent = '凭据已撤销，无法复制接入配置';
+      wrap.appendChild(hint);
+    }
+    wrap.appendChild(pre);
+    actions.appendChild(wrap);
+  }
+
+  // 静态行的复制入口：名称 / ID / 账号范围这三行的值渲染后不再变，点一下就把页面上
+  // 显示的那串文本写进剪贴板。值从行的 .key-row-value 读，剪贴板因此与肉眼所见一致
+  // ——账号范围拿到的是「指定: a, b」这种人读描述，而不是 account_policy 对象。
+  // 空值行不加按钮，而不是放一个永远点不动的禁用按钮。
+  function attachStaticCopyButton(row, labelText){
+    const valueEl = row.querySelector('.key-row-value');
+    if (!valueEl || !valueEl.textContent) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sm';
+    btn.textContent = '复制';
+    btn.setAttribute('aria-label', '复制' + labelText);
+    btn.onclick = async () => {
+      // 点下去再读值：中途被改也能复制到当下显示的内容。
+      const ok = await copyText(valueEl.textContent);
+      // 兜底路径与浏览器接口都失败才算失败，此时必须说失败，不能静默也不能报成功。
+      toast(labelText + (ok ? ' 已复制' : ' 复制失败'));
+    };
+    addKeyRowAction(row, btn);
+  }
+
+  // API Key 行：不用先点「显示」就能复制。点一次现取一次明文，直接交给 copyText；
+  // 明文只在这次点击的局部变量里活一下，不写进 textContent / title / data-*，也不进提示文案，
+  // 所以页面上始终只有掩码。取明文失败照实报原因，不能把失败说成已复制。
+  function attachApiKeyCopyButton(row, k){
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sm';
+    btn.textContent = '复制';
+    btn.setAttribute('aria-label', '复制完整 API Key');
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try{
+        // 与「显示」走同一个按需取明文接口，不新增读得更宽的入口。
+        const token = await fetchKeyToken(k.id);
+        if (!token) throw new Error('服务端没有返回密钥');
+        if (!(await copyText(token))) throw new Error('浏览器拒绝了剪贴板写入');
+        toast('已复制明文 API Key');
+      }catch(e){
+        toast('复制 API Key 失败：' + (e && e.message ? e.message : String(e)));
+      }finally{
+        btn.disabled = false;
+      }
+    };
+    addKeyRowAction(row, btn);
+  }
+
+  // 单张凭据卡片。行结构与顺序定在这里：后续票据只往自己那一行的操作位加按钮，
+  // 不重排顺序，也不改列表渲染。
+  function renderKeyCard(k){
+    const card = document.createElement('div');
+    card.className = 'key-card' + (k.revoked ? ' revoked' : '');
+
+    // 标题行只放请求次数与状态徽标；名称由下面的「名称」行承担，避免同一个值出现两次。
+    const head = document.createElement('div');
+    head.className = 'key-card-head';
+    const reqCount = document.createElement('span');
+    reqCount.className = 'key-card-req';
+    reqCount.textContent = `请求: ${k.stats.requests} 次`;
+    const statusBadge = document.createElement('span');
+    statusBadge.className = 'badge ' + (k.revoked ? 'revoked' : 'active');
+    statusBadge.textContent = k.revoked ? '已撤销' : '正常';
+    head.appendChild(reqCount);
+    head.appendChild(statusBadge);
+
+    const scopeDesc = k.account_policy.mode === 'all'
+      ? '全部账号'
+      : (k.account_policy.accounts && k.account_policy.accounts.length
+          ? '指定: ' + k.account_policy.accounts.join(', ')
+          : '无账号权限 (空集合)');
+
+    // Token 默认显示脱敏值（列表接口只发脱敏值）；明文只在点「显示」时单独取一次。
+    // 不把整串写进 title/aria 等属性里，否则「脱敏」只是视觉上的。
+    const tokenEl = document.createElement('span');
+    tokenEl.className = 'key-token';
+    tokenEl.dataset.masked = k.token;
+    tokenEl.textContent = k.token;
+
+    const btnEye = document.createElement('button');
+    btnEye.type = 'button';
+    btnEye.className = 'sm btn-eye';
+    btnEye.textContent = '显示';
+    btnEye.setAttribute('aria-label', '显示完整 Key');
+    btnEye.setAttribute('aria-pressed', 'false');
+    let revealed = false;
+    btnEye.onclick = async () => {
+      if (revealed){
+        // 收起时把明文从 DOM 里抹掉，而不是只盖一层遮罩。
+        tokenEl.textContent = tokenEl.dataset.masked;
+        tokenEl.classList.remove('revealed');
+        revealed = false;
+        btnEye.textContent = '显示';
+        btnEye.setAttribute('aria-label', '显示完整 Key');
+        btnEye.setAttribute('aria-pressed', 'false');
+        return;
+      }
+      btnEye.disabled = true;
+      try{
+        // 与 API Key 行的「复制」共用同一个按需取明文入口，错误也由它统一抛出。
+        tokenEl.textContent = await fetchKeyToken(k.id);
+        tokenEl.classList.add('revealed');
+        revealed = true;
+        btnEye.textContent = '隐藏';
+        btnEye.setAttribute('aria-label', '隐藏完整 Key');
+        btnEye.setAttribute('aria-pressed', 'true');
+      }catch(e){
+        toast('读取完整 Key 失败：' + e.message);
+      }finally{
+        btnEye.disabled = false;
+      }
+    };
+
+    // 「显示」按钮跟值放在一起，操作位留给后续票据的复制入口。
+    const tokenValue = document.createDocumentFragment();
+    tokenValue.appendChild(tokenEl);
+    tokenValue.appendChild(btnEye);
+
+    // 名称 / 接口地址 / API Key / 模型 / ID / 账号范围，顺序即后续票据依赖的展示顺序。
+    const nameRow = keyRow('名称', k.name || k.id);
+    nameRow.classList.add('key-row-name');
+    attachStaticCopyButton(nameRow, '名称');
+    // 接口地址是部署级派生值：当前访问地址 + /v1（location.origin 不带尾斜杠，不会拼出 //）。
+    const baseRow = keyRow('接口地址', location.origin + '/v1');
+    attachBaseUrlRow(baseRow);
+    const tokenRow = keyRow('API Key', tokenValue);
+    attachApiKeyCopyButton(tokenRow, k);
+    // 模型要按需用这把 key 去读，渲染列表时只占位，不发请求。
+    const modelRow = keyRow('模型', '点复制时读取');
+    attachModelRow(modelRow, k);
+    const idRow = keyRow('ID', k.id);
+    attachStaticCopyButton(idRow, 'ID');
+    const scopeRow = keyRow('账号范围', scopeDesc);
+    attachStaticCopyButton(scopeRow, '账号范围');
+
+    const actions = document.createElement('div');
+    actions.className = 'key-card-actions';
+
+    const btnEdit = document.createElement('button');
+    btnEdit.className = 'sm';
+    btnEdit.textContent = '修改';
+    btnEdit.onclick = async () => {
+      const newName = prompt('输入新展示名称 (内部 ID 保持稳定):', k.name);
+      if (newName === null) return;
+      const newAccounts = prompt('输入允许访问的账号 (留空表示全部；输入逗号分隔集合；输入 none 表示空集合拒绝全部):',
+        k.account_policy.mode === 'all' ? '' : k.account_policy.accounts.join(', '));
+      if (newAccounts === null) return;
+      let policy;
+      if (!newAccounts.trim()){
+        policy = { mode: 'all', accounts: [] };
+      } else if (newAccounts.trim().toLowerCase() === 'none'){
+        policy = { mode: 'explicit', accounts: [] };
+      } else {
+        policy = { mode: 'explicit', accounts: newAccounts.split(/[,，\s]+/).filter(Boolean) };
+      }
+      await fetch(`/api/admin/keys/${k.id}`, {
+        method: 'PATCH',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ name: newName.trim() || k.name, account_policy: policy }),
+      });
+      await loadAdminKeys();
+    };
+    actions.appendChild(btnEdit);
+
+    if (!k.revoked){
+      const btnRevoke = document.createElement('button');
+      btnRevoke.className = 'sm';
+      btnRevoke.style.color = 'var(--danger)';
+      btnRevoke.textContent = '撤销';
+      btnRevoke.onclick = async () => {
+        if (!confirm(`确认撤销凭据 "${k.name}" 吗？撤销后其发起的任何 HTTP 与 WebSocket 调用将立即被拒绝。`)) return;
+        await fetch(`/api/admin/keys/${k.id}/revoke`, {
+          method: 'POST',
+          headers: getAdminHeaders(),
+        });
+        await loadAdminKeys();
+      };
+      actions.appendChild(btnRevoke);
+    }
+
+    addConfigCopyControls(actions, k);
+
+    card.appendChild(head);
+    card.appendChild(nameRow);
+    card.appendChild(baseRow);
+    card.appendChild(tokenRow);
+    card.appendChild(modelRow);
+    card.appendChild(idRow);
+    card.appendChild(scopeRow);
+    card.appendChild(actions);
+    return card;
+  }
+
+  // 管理后台：修改管理口令
+  $('btnSaveAdminPwd').onclick = async () => {
+    const pwd = $('newAdminPwd').value;
+    const err = $('adminPwdErr');
+    if (!pwd || pwd.length < 4){ err.textContent = '新口令至少需要 4 位字符'; return; }
+    err.textContent = '';
+    try{
+      const r = await fetch('/api/admin/password', {
+        method: 'POST',
+        headers: getAdminHeaders(),
+        body: JSON.stringify({ password: pwd }),
+      });
+      const j = await r.json();
+      if (r.ok && j.ok){
+        alert('管理口令已成功更新，既有会话已失效，请重新登录。');
+        setAdminToken('');
+        closePanels();
+        showAdminLogin();
+      } else {
+        err.textContent = (j.error && j.error.message) || '修改口令失败';
+      }
+    }catch(e){
+      err.textContent = '请求失败: ' + e.message;
+    }
+  };
+
+  // 管理后台：模型回落
+  const SOURCE_LABEL = {
+    ui: '当前由本面板设置',
+    'env:FALLBACK_MODEL': '来自环境变量 FALLBACK_MODEL',
+    'env:ANTHROPIC_FALLBACK_MODEL': '来自环境变量 ANTHROPIC_FALLBACK_MODEL',
+    auto: '自动挑选（优先 deepseek-flash）',
+  };
+  function renderFallback(d){
+    const sel = $('fallbackSel');
+    sel.textContent = '';
+    const optAuto = document.createElement('option');
+    optAuto.value = '';
+    optAuto.textContent = '自动（默认）';
+    sel.appendChild(optAuto);
+    (d.options||[]).forEach(o => {
+      const opt = document.createElement('option');
+      opt.value = o;
+      opt.textContent = o;
+      sel.appendChild(opt);
+    });
+    sel.value = (d.source === 'ui') ? (d.current||'') : '';
+    $('fallbackNote').textContent = `实际回落：${d.current||'-'} · ${SOURCE_LABEL[d.source]||d.source}`;
+  }
+  async function loadFallback(){
+    try{
+      const r = await fetch('/api/fallback', { headers: getAdminHeaders() });
+      if (r.ok) renderFallback(await r.json());
+      else $('fallbackNote').textContent = '读取回落设置需管理员权限';
+    }catch(e){ $('fallbackNote').textContent = '读取失败'; }
+  }
+  $('btnSaveFallback').onclick = async ()=>{
+    const btn = $('btnSaveFallback');
+    btn.textContent = '保存中'; btn.disabled = true;
+    try{
+      const r = await fetch('/api/fallback', {
+        method:'POST', headers: getAdminHeaders(),
+        body: JSON.stringify({ model: $('fallbackSel').value }),
+      });
+      if (r.ok) renderFallback(await r.json());
+      else $('fallbackNote').textContent = '保存失败：未授权';
+    }catch(e){ $('fallbackNote').textContent = '保存失败'; }
+    btn.textContent = '保存'; btn.disabled = false;
+  };
+
+  // ---- events ----
+  $('btnSend').onclick = send;
+  $('btnSend2').onclick = send;
+  $('input').addEventListener('keydown', e=>{
+    if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }
+  });
+  $('input').addEventListener('input', updateTokLive);
+
+  // 保存值和生效值可能不一样（比如新地址绑不上、已回滚），页面必须把这件事说出来，
+  // 否则用户会以为换绑成功了，而实际访问的还是旧地址。
+  //
+  // 配置里「监听 IP + 端口」仍是同一个 bind_address 字段（host[:port]），
+  // 页面把它拆成两个输入框，保存时再拼回去 —— 拆只发生在展示层。
+  function splitBind(value){
+    const raw = String(value || '').trim();
+    const i = raw.lastIndexOf(':');
+    if (i < 0) return { host: raw, port: null };
+    return { host: raw.slice(0, i), port: raw.slice(i + 1) };
+  }
+
+  // 你现在是通过哪个端口打开这个页面的 —— 也就是容器外（或反代外）的那个端口。
+  function accessPort(){
+    if (typeof location === 'undefined') return '';
+    if (location.port) return String(location.port);
+    return location.protocol === 'https:' ? '443' : '80';
+  }
+
+  // 你此刻是从哪个地址访问的（容器外 / 反代外看到的那个），用于写清「外面是哪个端口」。
+  function accessTarget(){
+    if (typeof location === 'undefined') return '';
+    const host = location.hostname || location.host || '';
+    const port = accessPort();
+    if (!host) return '';
+    return port ? host + ':' + port : host;
+  }
+
+  function renderBindEffective(saved, effective, effectivePort){
+    state.effectiveBind = effective || null;
+    state.effectivePort = effectivePort || null;
+    const el = $('bindEffective');
+    if (!el) return;
+    if (!effective) { el.style.color = ''; el.textContent = '当前生效：未知'; return; }
+    // 生效值只有主机时补上真实端口，否则用户不知道自己到底在哪个端口上。
+    const shown = /:\d+$/.test(effective) || !effectivePort ? effective : effective + ':' + effectivePort;
+    const savedParts = splitBind(saved);
+    // 只比主机；端口单独比，且保存值没写端口时不构成「未生效」。
+    const mismatch = saved && (savedParts.host !== effective
+      || (savedParts.port && effectivePort && savedParts.port !== String(effectivePort)));
+    // 两个端口同名不同物：把「容器内」「容器外」都写出来，别只甩一个 :8080 让人猜。
+    const inside = '容器内 ' + shown;
+    const outside = state.container && accessTarget() ? ' · 容器外 ' + accessTarget() : ' · 本机部署，内外同一个端口';
+    const text = '当前生效：' + inside + outside;
+    if (mismatch) {
+      el.style.color = 'var(--danger)';
+      el.textContent = text + '（保存的 ' + saved + ' 未生效，可再保存一次重试）';
+    } else {
+      el.style.color = '';
+      el.textContent = text;
+    }
+  }
+
+  // 容器外端口：容器里它归 compose 的端口映射管，本页只能给命令；
+  // 本机部署没有映射，内外是同一个端口，改内端口就够了。
+  function renderPortFields(container, effectivePort){
+    state.container = !!container;
+    const hostInput = $('setHostPort');
+    const note = $('hostPortNote');
+    const cmdBtn = $('btnCopyPortCmd');
+    if (!hostInput) return;
+    if (state.container){
+      hostInput.disabled = false;
+      // 只在还没填过（或上次是自动填的）时预填，别把用户刚敲的值冲掉。
+      if (!hostInput.value || hostInput.dataset.auto === '1'){
+        hostInput.value = accessPort();
+        hostInput.dataset.auto = '1';
+      }
+      if (note) note.textContent = '宿主机上访问用的端口，由 compose 的端口映射决定，本页改不了；改它要用下面这条命令。';
+      if (cmdBtn) cmdBtn.style.display = '';
+    } else {
+      hostInput.disabled = true;
+      hostInput.dataset.auto = '0';
+      hostInput.value = effectivePort ? String(effectivePort) : '';
+      if (note) note.textContent = '本机部署没有容器映射，内外是同一个端口，改上面的「容器内端口」就等于改它。';
+      if (cmdBtn) cmdBtn.style.display = 'none';
+    }
+    updatePortCommand();
+  }
+
+  function portCommand(){
+    const inside = (($('setListenPort') || {}).value || '').trim();
+    const outside = (($('setHostPort') || {}).value || '').trim();
+    if (!state.container){
+      return inside ? './scripts/set-port.sh --container ' + inside : '';
+    }
+    const parts = [];
+    if (outside) parts.push('--host ' + outside);
+    if (inside) parts.push('--container ' + inside);
+    return parts.length ? './scripts/set-port.sh ' + parts.join(' ') : '';
+  }
+
+  function updatePortCommand(){
+    const box = $('portCmd');
+    if (box) box.textContent = portCommand();
+  }
+
+  async function copyPortCommand(){
+    const text = portCommand();
+    if (!text) return;
+    const ok = await copyText(text);
+    toast(ok ? '命令已复制，到宿主机终端执行' : '复制失败，请手动选中命令复制');
+  }
+
+  // 设置页：运行时配置（ADR-0013）+ 重置本地统计
+  async function loadSettings(knownSession){
+    try{
+      const r = await fetch('/api/settings', { headers: getAdminHeaders(), cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      const s = (j && j.settings) || {};
+      if (s.max_concurrency_per_account != null) $('setMaxConcurrency').value = s.max_concurrency_per_account;
+      if (s.session_binding_ttl_sec != null) $('setSessionTtl').value = s.session_binding_ttl_sec;
+      $('setSessionBinding').checked = !!s.session_binding_enabled;
+      if (s.short_request_timeout_sec != null) $('setShortTimeout').value = s.short_request_timeout_sec;
+      if (s.first_byte_timeout_sec != null) $('setFirstByte').value = s.first_byte_timeout_sec;
+      if (s.stream_idle_timeout_sec != null) $('setStreamIdle').value = s.stream_idle_timeout_sec;
+      if (s.outbound_user_agent != null) $('setUserAgent').value = s.outbound_user_agent;
+      const eff = (j && j.effective) || {};
+      const savedBind = splitBind(s.bind_address);
+      if (s.bind_address != null) $('setBindAddress').value = savedBind.host;
+      $('setListenPort').value = eff.bind_port != null ? eff.bind_port : (savedBind.port || '');
+      renderPortFields(j && j.container, eff.bind_port);
+      if (s.request_log_retention_days != null) $('setLogRetention').value = s.request_log_retention_days;
+      if (s.request_log_max_mb != null) $('setLogMaxMb').value = s.request_log_max_mb;
+      $('setLogCaptureSource').checked = !!s.request_log_capture_source;
+      renderBindEffective(s.bind_address, eff.bind_address || null, eff.bind_port || null);
+      $('settingsMsg').textContent = '';
+    }catch(e){
+      $('settingsMsg').textContent = '读取设置失败：' + e.message;
+    }
+    // 管理口令区块只在显式启用时才显示（ADR-0012）；TAB 切换已经查过会话就复用，别重复请求。
+    const adminState = knownSession || await getAdminSession();
+    $('adminPwdSection').style.display = adminState.configured ? '' : 'none';
+  }
+
+  async function saveSettings(){
+    const beforePort = state.effectivePort;
+    const btn = $('btnSaveSettings');
+    // 两个输入框拼回一个 bind_address；IP 必填、端口必须合法，先在这里拦掉。
+    const bindHost = ($('setBindAddress').value || '').trim();
+    const bindPort = Number(($('setListenPort').value || '').trim());
+    if (!bindHost){
+      $('settingsMsg').textContent = '保存失败：监听 IP 不能为空';
+      return;
+    }
+    if (!Number.isInteger(bindPort) || bindPort < 1 || bindPort > 65535){
+      $('settingsMsg').textContent = '保存失败：容器内端口必须是 1-65535 的整数';
+      return;
+    }
+    btn.disabled = true;
+    $('settingsMsg').textContent = '保存中…';
+    // 契约是扁平对象 { key: value }，不再额外套一层 sessions
+    const payload = {
+      max_concurrency_per_account: Number($('setMaxConcurrency').value),
+      session_binding_ttl_sec: Number($('setSessionTtl').value),
+      session_binding_enabled: $('setSessionBinding').checked,
+      short_request_timeout_sec: Number($('setShortTimeout').value),
+      first_byte_timeout_sec: Number($('setFirstByte').value),
+      stream_idle_timeout_sec: Number($('setStreamIdle').value),
+      outbound_user_agent: $('setUserAgent').value,
+      request_log_retention_days: Number($('setLogRetention').value),
+      request_log_max_mb: Number($('setLogMaxMb').value),
+      request_log_capture_source: $('setLogCaptureSource').checked,
+    };
+    // 端点没变就不提交：换绑有成本（会停一次 accept），也让 env 里配的 IPv6 之类
+    // 不被一个没动过的输入框顺手打回去。
+    const sameEndpoint = splitBind(state.effectiveBind || '').host === bindHost
+      && String(state.effectivePort || '') === String(bindPort);
+    if (!sameEndpoint) payload.bind_address = bindHost + ':' + bindPort;
+    try{
+      const r = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: getAdminHeaders(),
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json().catch(()=>null);
+      if (r.ok && j && j.ok){
+        const ignored = (j && j.ignored) || [];
+        $('settingsMsg').textContent = '已保存 · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        // 后端会忽略它不认识的键（页面版本比后端新时不算错误），但不能让用户以为全存上了。
+        if (ignored.length) toast('这些设置项当前版本不支持，已忽略：' + ignored.join('、'));
+        renderBindEffective((j.settings && j.settings.bind_address) || null,
+          (j.effective && j.effective.bind_address) || null,
+          (j.effective && j.effective.bind_port) || null);
+        updatePortCommand();
+        // 容器里换了内端口，宿主机映射不会自己跟着变：当场把补救方式说出来。
+        const afterPort = (j.effective && j.effective.bind_port) || null;
+        if (state.container && payload.bind_address && afterPort && String(afterPort) !== String(beforePort)){
+          $('settingsMsg').textContent += ' · 容器内端口已换到 ' + afterPort + '，宿主机映射要同步：复制下面的命令执行';
+        }
+      }else{
+        $('settingsMsg').textContent = '保存失败：' + ((j && j.error && j.error.message) || ('HTTP ' + r.status));
+        if (j && j.error && j.error.effective) renderBindEffective(bindHost + ':' + bindPort, j.error.effective.bind_address, j.error.effective.bind_port);
+      }
+    }catch(e){
+      $('settingsMsg').textContent = '保存失败：' + e.message;
+    }finally{
+      btn.disabled = false;
+    }
+  }
+
+  $('btnSaveSettings').onclick = saveSettings;
+  $('btnCopyPortCmd').onclick = copyPortCommand;
+  // 端口输入变化时实时更新要复制的命令，免得复制到旧值。
+  ['setBindAddress', 'setListenPort', 'setHostPort'].forEach((id)=>{
+    const el = $(id);
+    if (!el) return;
+    el.oninput = ()=>{ if (id === 'setHostPort') el.dataset.auto = '0'; updatePortCommand(); };
+  });
+  $('btnReset').onclick = ()=> resetLocalStats();
+
+  // 仪表盘：常驻刷新与账号池入口
+  $('btnDashRefresh').onclick = ()=> loadDashboard(true);
+  $('btnDashAdmin').onclick = ()=> openAddAccountFlow();
+  $('btnDashKey').onclick = ()=> openCreateKeyFlow();
+  $('btnDashReauth').onclick = ()=> openAddAccountFlow();
+  $('dashModelSelect').onchange = ()=> selectModel($('dashModelSelect').value);
+  window.addEventListener('load', ()=>{ if (state.dashboard) renderDashboardCharts(state.dashboard); });
+
+  // 对话页：清空会话（原独立浮层，改为就地确认）
+  $('btnClear').onclick = ()=>{
+    if (state.streaming) return;
+    if (!confirm('清空当前对话？此操作不可恢复。')) return;
+    resetChatUI();
+  };
+
+  // 顶部模型 chip → 模型页
+  $('modelChip').onclick = ()=> switchTab('models');
+
+  // 左侧 TAB
+  document.querySelectorAll('#tabNav .tab').forEach(b => {
+    b.onclick = ()=> switchTab(b.dataset.tab);
+  });
+
+  // 日志页
+  $('btnLogRefresh').onclick = ()=> loadLogs();
+  $('logAuto').onchange = ()=>{ scheduleLogPoll(); if ($('logAuto').checked) loadLogs(); };
+  $('btnLogFilterApply').onclick = ()=> loadLogs();
+  $('logFilterOutcome').onchange = ()=> loadLogs();
+  LOG_FILTER_INPUTS.forEach((id)=>{
+    const el = $(id);
+    if (!el) return;
+    el.onchange = ()=> loadLogs();
+    el.onkeydown = (ev)=>{ if (ev.key === 'Enter') loadLogs(); };
+  });
+  $('btnLogClearFilters').onclick = ()=>{
+    LOG_FILTER_INPUTS.forEach((id)=>{ const el = $(id); if (el) el.value = ''; });
+    $('logFilterOutcome').value = '';
+    loadLogs();
+  };
+
+  // 用量页只有这一个 60 秒刷新入口：会话列表与账本一起刷，
+  // 账本仍然只在停留于用量页时刷新（与改造前一致，不在后台白读）。
+  function refreshUsageLive(){
+    loadUsage();
+    if (state.tab === 'usage') loadUsageBuckets();
+  }
+
+  // ---- init ----
+  (async ()=>{
+    switchTab('chat');
+    await ensureKey();
+    initUsagePage();
+    await loadModels();
+    await loadDashboard();
+    await loadUsage();
+    await loadUsageBuckets();
+    setConn('ok');
+    updateTokLive();
+    setInterval(()=>{ if (!document.hidden) refreshUsageLive(); }, 60000);
+    setInterval(()=>{ if (!document.hidden) loadDashboard(); }, 15000);
+    document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) loadDashboard(); });
+  })();
+})();
+</script>
+</body>
+</html>

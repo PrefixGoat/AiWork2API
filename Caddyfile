@@ -1,0 +1,39 @@
+# Caddy 反向代理配置（docker compose --profile tls 时启用）
+#
+# Caddy 会自动向 Let's Encrypt 申请证书并续期，前提是：
+#   1) 域名 A 记录已指向本机公网 IP
+#   2) 80 / 443 端口在外网可达
+#   3) 服务器上没有别的程序占用 80/443
+
+# 域名从环境变量 DOMAIN 读；没填时退化成 localhost（自签证书，仅用于验证）
+{$DOMAIN:localhost} {
+	encode zstd gzip
+	log {
+		output stdout
+		format console
+	}
+
+	reverse_proxy aiwork:8080 {
+		# 关键：SSE 流式输出必须禁用响应缓冲，否则前端要等全部生成完才收到
+		flush_interval -1
+		# 模型生成可能很慢，放宽读超时
+		transport http {
+			read_timeout 600s
+			write_timeout 600s
+		}
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+	}
+}
+
+# 如果想连网页界面都加一层保护，可以给 / 单独加 basic auth：
+#   先执行 docker run --rm caddy:2-alpine caddy hash-password --plaintext '你的密码'
+#   再把下面的注释打开并填入哈希
+#
+#	@ui path /
+#	basic_auth @ui {
+#		admin $2a$14$替换成上一步生成的哈希
+#	}
