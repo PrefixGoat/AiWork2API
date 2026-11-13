@@ -12,7 +12,7 @@
 - [配置与环境变量](configuration.md)：环境要求、`.env` 全表、监听与端口、运行时设置 11 项、两种上游模式的实测对比、裸机 systemd 部署与 Windows 原生 Node 部署。
 - [排障与已知限制](troubleshooting.md)：启动 / 登录 / 流式三类故障、`DEBUG_DUMP` 抓包、限制全表。
 
-协议集成测试位于 `tests/`；启动、登录、发 Key、部署烟测与一键上手位于 `scripts/`（`quickstart.sh` 走 Docker，`start-systemd.sh` 与 `start-windows.ps1` 走裸机；另有 `smoke-test.sh`、`set-port.sh`、`issue-key.sh`）。
+协议集成测试位于 `tests/`；启动、登录、发 Key、部署烟测与一键上手位于 `scripts/`（`quickstart.sh` 与 `quickstart.ps1` 走 Docker，前者给 bash、后者给 PowerShell；`start-systemd.sh` 与 `start-windows.ps1` 走裸机；另有 `smoke-test.sh`、`set-port.sh`、`issue-key.sh`）。
 
 ## 开源与安全
 

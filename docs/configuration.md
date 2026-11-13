@@ -43,7 +43,7 @@
 | `USAGE_BUCKETS_PATH` | 与 `STATE_PATH` 同目录的 `usage-buckets.json` | 用量账本；清空统计不清它（ADR-0017） |
 | `TRUST_PROXY` | `0` | 反代后面设为 `1`，按 `X-Forwarded-For` 记录真实来源 |
 | `CONTAINER_NAME` | `aiwork` | compose 的容器名（Caddy 容器为 `<CONTAINER_NAME>-caddy`）；同机跑多个实例时改掉，否则会撞名。只影响容器命名，`docker compose exec aiwork` 仍按服务名寻址 |
-| `AGENTIX_HOST_STATE_DIR` | `~/.local/share/agentix` | **宿主机**上官方 CLI 登录态目录，只读挂到容器 `/accounts/default`。Windows 上通常填 `C:/Users/你的用户名/.agentix`；`quickstart.sh` 会按探测结果写入 `.env`。与裸机的 `AGENTIX_STATE_DIR` 不是同一个东西：后者是进程自己读的目录 |
+| `AGENTIX_HOST_STATE_DIR` | `~/.local/share/agentix` | **宿主机**上官方 CLI 登录态目录，只读挂到容器 `/accounts/default`。Windows 上通常填 `C:/Users/你的用户名/.agentix`；`quickstart.sh` 与 `quickstart.ps1` 会按探测结果写入 `.env`。与裸机的 `AGENTIX_STATE_DIR` 不是同一个东西：后者是进程自己读的目录 |
 
 ## 监听地址与容器健康检查
 

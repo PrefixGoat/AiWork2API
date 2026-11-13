@@ -45,9 +45,19 @@ aiworkcn auth status --json               # 确认已登录
 
 ### 用 Docker 脚本
 
+Linux / macOS：
+
 ```bash
 git clone https://github.com/PrefixGoat/AiWork2API.git && cd AiWork2API
 bash scripts/quickstart.sh
+```
+
+Windows（PowerShell 5.1 不支持 `&&`，分两行执行）：
+
+```powershell
+git clone https://github.com/PrefixGoat/AiWork2API.git
+cd AiWork2API
+powershell -ExecutionPolicy Bypass -File scripts\quickstart.ps1
 ```
 
 脚本会生成 `.env` 并替换默认占位密钥，按探测到的登录态目录配置只读挂载，构建并启动容器，探活通过后输出控制台地址、Base URL 与生成的 API Key。

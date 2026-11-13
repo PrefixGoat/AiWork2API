@@ -12,8 +12,13 @@
  * 7. 端口被占用时要明确报错，不能静默退出
  * 8. .env 里用户已填的挂载源不能被脚本覆盖
  * 9. Windows 裸机脚本生成的 .env.windows 与 data-windows/ 不会进 git
+ * 10. quickstart.ps1 在缺 Docker 时明确报错，不能静默退出
+ * 11. quickstart.ps1 识别登录态目录并写入 .env 的挂载源
+ * 12. quickstart.ps1 不覆盖 .env 里用户已填的挂载源
+ * 13. quickstart.ps1 把占位 key 换成随机值，保留展示名后缀
+ * 14. README 的 clone 段落同时给出 bash 与 PowerShell 两版
  *
- * 这些脚本只面向 POSIX shell，没有 bash 的环境跳过并明确提示。
+ * shell 脚本在没有 bash 的环境跳过；PowerShell 脚本在没有 powershell/pwsh 的环境跳过。
  */
 
 const assert = require('assert');
@@ -21,7 +26,7 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
-const { spawnSync, execFileSync } = require('child_process');
+const { spawn, spawnSync, execFileSync } = require('child_process');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 
@@ -42,6 +47,35 @@ function hasBash() {
 }
 
 /**
+ * Windows 上给 PowerShell 用的 docker 桩。
+ * @param {string} binDir
+ * @param {string} [psOutput] 非空时让 `compose ps` 输出它，用来模拟「本项目容器正在跑」
+ */
+function writeDockerCmd(binDir) {
+  const lines = [
+    '@echo off',
+    'if "%~1"=="compose" goto compose',
+    'exit /b 0',
+    ':compose',
+    'if "%~2"=="version" goto version',
+    'if "%~2"=="ps" goto ps',
+    'if "%~2"=="up" goto up',
+    'exit /b 0',
+    ':version',
+    'echo Docker Compose version v2.0.0',
+    'exit /b 0',
+    ':ps',
+    'if not "%AIWORK_TEST_PS_OUTPUT%"=="" echo %AIWORK_TEST_PS_OUTPUT%',
+    'exit /b 0',
+    ':up',
+    'if not "%AIWORK_TEST_ARGS%"=="" echo %*>>"%AIWORK_TEST_ARGS%"',
+    'if not "%AIWORK_TEST_MARKER%"=="" echo up>>"%AIWORK_TEST_MARKER%"',
+    'exit /b 0',
+  ];
+  fs.writeFileSync(path.join(binDir, 'docker.cmd'), `${lines.join('\r\n')}\r\n`);
+}
+
+/**
  * 造一个临时项目副本，外部命令换成桩，端口换成空闲端口，避免真的构建/启动
  * @param {number} [forcedPort] 指定端口（用于构造端口占用场景）
  */
@@ -56,6 +90,10 @@ async function makeFixture(forcedPort) {
   }
   fs.copyFileSync(path.join(ROOT_DIR, 'scripts', 'quickstart.sh'), path.join(dir, 'scripts', 'quickstart.sh'));
   fs.copyFileSync(path.join(ROOT_DIR, 'scripts', 'start-systemd.sh'), path.join(dir, 'scripts', 'start-systemd.sh'));
+  const psQuickstart = path.join(ROOT_DIR, 'scripts', 'quickstart.ps1');
+  if (fs.existsSync(psQuickstart)) {
+    fs.copyFileSync(psQuickstart, path.join(dir, 'scripts', 'quickstart.ps1'));
+  }
   fs.mkdirSync(path.join(dir, 'systemd'), { recursive: true });
   fs.copyFileSync(path.join(ROOT_DIR, 'systemd', 'aiwork-bridge.service'),
     path.join(dir, 'systemd', 'aiwork-bridge.service'));
@@ -76,8 +114,8 @@ async function makeFixture(forcedPort) {
       'if [ "$1" = "compose" ]; then',
       '  case "$2" in',
       '    version) echo "Docker Compose version v2.0.0"; exit 0 ;;',
-      '    ps) exit 0 ;;',
-      '    up) [ -n "${AIWORK_TEST_MARKER:-}" ] && echo up >> "$AIWORK_TEST_MARKER"; exit 0 ;;',
+      '    ps) [ -n "${AIWORK_TEST_PS_OUTPUT:-}" ] && echo "$AIWORK_TEST_PS_OUTPUT"; exit 0 ;;',
+      '    up) [ -n "${AIWORK_TEST_ARGS:-}" ] && echo "$*" >> "$AIWORK_TEST_ARGS"; [ -n "${AIWORK_TEST_MARKER:-}" ] && echo up >> "$AIWORK_TEST_MARKER"; exit 0 ;;',
       '  esac',
       'fi',
       'exit 0',
@@ -103,6 +141,9 @@ async function makeFixture(forcedPort) {
     fs.chmodSync(p, 0o755);
   }
 
+  // PowerShell 不执行无扩展名的 sh 桩，Windows 上另给一份 .cmd
+  if (process.platform === 'win32') writeDockerCmd(binDir);
+
   return { dir, binDir, port };
 }
 
@@ -116,6 +157,41 @@ function runScript(fixture, scriptRelPath, homeDir, extraEnv = {}) {
       ...extraEnv,
     },
     encoding: 'utf8',
+  });
+}
+
+/** Windows 自带 powershell.exe；Linux / macOS 上的 PowerShell 7 是 pwsh */
+function psExe() {
+  return process.platform === 'win32' ? 'powershell' : 'pwsh';
+}
+
+function hasPowershell() {
+  return spawnSync(psExe(), ['-NoProfile', '-Command', 'exit 0'], { encoding: 'utf8' }).status === 0;
+}
+
+/**
+ * 异步跑 PowerShell 脚本。不能用 spawnSync：测试里的 healthz 服务跑在同一个
+ * Node 进程，spawnSync 会阻塞事件循环，脚本探活永远等不到响应。
+ */
+function runPsScript(fixture, scriptRelPath, homeDir, extraEnv = {}, extraArgs = []) {
+  return new Promise((resolve) => {
+    const child = spawn(psExe(), [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptRelPath, ...extraArgs,
+    ], {
+      cwd: fixture.dir,
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        USERPROFILE: homeDir,          // PowerShell 读这个找用户目录
+        PATH: `${fixture.binDir}${path.delimiter}${process.env.PATH}`,
+        ...extraEnv,
+      },
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d.toString('utf8'); });
+    child.stderr.on('data', (d) => { stderr += d.toString('utf8'); });
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
   });
 }
 
@@ -362,6 +438,141 @@ function test9_WindowsArtifactsAreIgnored() {
   assert.ok(!readme.includes('——'), 'README 不应使用破折号');
 }
 
+/** 起一个只回 /healthz=ok 的本地服务，让 PowerShell 脚本的探活真的成功 */
+async function startHealthz(port) {
+  const http = require('http');
+  const srv = http.createServer((req, res) => {
+    if (req.url === '/healthz') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('ok');
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  await new Promise((resolve, reject) => {
+    srv.once('error', reject);
+    srv.listen(port, '127.0.0.1', resolve);
+  });
+  return srv;
+}
+
+async function test10_PowerShellQuickstartWritesEnv() {
+  console.log('[Test 10] quickstart.ps1 能跑通并写入 .env 的挂载源...');
+  const fixture = await makeFixture();
+  const home = mkHome('.agentix');           // 只有 ~/.agentix
+  // healthz 服务先占住端口，模拟「旧容器还在跑」：脚本应复用而不是报端口冲突
+  const healthz = await startHealthz(fixture.port);
+  try {
+    const r = await runPsScript(fixture, 'scripts/quickstart.ps1', home, {
+      AIWORK_TEST_PS_OUTPUT: 'aiwork',
+    });
+    const out = `${r.stdout}${r.stderr}`;
+    assert.strictEqual(r.status, 0,
+      `quickstart.ps1 应以 0 退出，实际 ${r.status}（端口 ${fixture.port}）\n输出：\n${out}`);
+    assert.ok(out.includes('服务已就绪'), `应报告服务已就绪，实际输出：\n${out}`);
+    assert.ok(out.includes('Base URL'), `应打印接入地址，实际输出：\n${out}`);
+
+    const hostDir = envLine(path.join(fixture.dir, '.env'), 'AGENTIX_HOST_STATE_DIR');
+    assert.ok(hostDir, '.env 应写入 AGENTIX_HOST_STATE_DIR');
+    assert.ok(hostDir.endsWith('/.agentix'), `挂载源应指向 .agentix，实际：${hostDir}`);
+    assert.ok(!hostDir.includes('\\'), `compose 的挂载源不能含反斜杠，实际：${hostDir}`);
+  } finally {
+    await new Promise((resolve) => healthz.close(resolve));
+    cleanup(fixture.dir, home);
+  }
+}
+
+function test11_ReadmeOffersBothShells() {
+  console.log('[Test 11] README 的 clone 段落同时给出 bash 与 PowerShell 两版...');
+  const readme = fs.readFileSync(path.join(ROOT_DIR, 'README.md'), 'utf8');
+  assert.ok(readme.includes('bash scripts/quickstart.sh'), 'README 应保留 bash 启动命令');
+  assert.ok(readme.includes('quickstart.ps1'), 'README 应给出 PowerShell 启动命令');
+
+  const blocks = [...readme.matchAll(/```powershell\r?\n([\s\S]*?)```/g)].map((m) => m[1]);
+  const cloneBlock = blocks.find((b) => b.includes('git clone') && b.includes('AiWork2API'));
+  assert.ok(cloneBlock, 'PowerShell 代码块里应有 git clone 与 cd');
+
+  const lines = cloneBlock.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  assert.ok(lines.some((l) => l.startsWith('git clone')), 'PowerShell 块里应有独立的 git clone 行');
+  assert.ok(lines.some((l) => /^cd\s+AiWork2API$/i.test(l)), 'PowerShell 块里应有独立的 cd AiWork2API 行');
+  assert.ok(!cloneBlock.includes('&&'), 'PowerShell 5.1 不支持 &&，clone 与 cd 必须分两行');
+}
+
+async function test12_PowerShellKeepsExistingMount() {
+  console.log('[Test 12] quickstart.ps1 不覆盖 .env 里已填的挂载源...');
+  const fixture = await makeFixture();
+  const home = mkHome('.agentix');
+  const custom = path.join(fixture.dir, 'my-state');
+  fs.mkdirSync(custom, { recursive: true });
+  const envPath = path.join(fixture.dir, '.env');
+  fs.writeFileSync(envPath, fs.readFileSync(path.join(fixture.dir, '.env.example'), 'utf8')
+    .replace(/^AGENTIX_HOST_STATE_DIR=.*$/m, `AGENTIX_HOST_STATE_DIR=${custom}`));
+  const healthz = await startHealthz(fixture.port);
+  try {
+    const r = await runPsScript(fixture, 'scripts/quickstart.ps1', home, {
+      AIWORK_TEST_PS_OUTPUT: 'aiwork',
+    });
+    assert.strictEqual(r.status, 0,
+      `应成功，实际 ${r.status}\n${r.stdout}${r.stderr}`);
+    assert.strictEqual(envLine(envPath, 'AGENTIX_HOST_STATE_DIR'), custom,
+      '用户显式填写的挂载源应优先，不能被探测结果改写');
+  } finally {
+    await new Promise((resolve) => healthz.close(resolve));
+    cleanup(fixture.dir, home);
+  }
+}
+
+async function test13_PowerShellReplacesPlaceholderKey() {
+  console.log('[Test 13] quickstart.ps1 替换占位 key 并保留展示名...');
+  const fixture = await makeFixture();
+  const home = mkHome('.agentix');
+  const healthz = await startHealthz(fixture.port);
+  try {
+    const r = await runPsScript(fixture, 'scripts/quickstart.ps1', home, {
+      AIWORK_TEST_PS_OUTPUT: 'aiwork',
+    });
+    assert.strictEqual(r.status, 0, `应成功，实际 ${r.status}\n${r.stdout}${r.stderr}`);
+
+    const apiKeys = envLine(path.join(fixture.dir, '.env'), 'API_KEYS');
+    assert.ok(apiKeys, '.env 应有 API_KEYS');
+    assert.ok(!apiKeys.includes('sk-change-me-please'), '公开的占位 key 必须被换掉');
+    assert.ok(/^sk-[0-9a-f]{48}:default$/.test(apiKeys),
+      `应生成 24 字节随机 key 并保留 :default，实际：${apiKeys}`);
+
+    const key = apiKeys.split(':')[0];
+    assert.ok(`${r.stdout}${r.stderr}`.includes(key), 'stdout 应打印实际写入的 key');
+  } finally {
+    await new Promise((resolve) => healthz.close(resolve));
+    cleanup(fixture.dir, home);
+  }
+}
+
+async function test14_PowerShellComposeUpIsDetached() {
+  console.log('[Test 14] quickstart.ps1 启动容器时必须带 -d...');
+  const fixture = await makeFixture();
+  const home = mkHome('.agentix');
+  const healthz = await startHealthz(fixture.port);
+  const argsFile = path.join(fixture.dir, 'compose-args.txt');
+  try {
+    const r = await runPsScript(fixture, 'scripts/quickstart.ps1', home, {
+      AIWORK_TEST_PS_OUTPUT: 'aiwork',
+      AIWORK_TEST_ARGS: argsFile,
+    });
+    assert.strictEqual(r.status, 0, `应成功，实际 ${r.status}\n${r.stdout}${r.stderr}`);
+    assert.ok(fs.existsSync(argsFile), '桩应记录 compose 调用参数');
+
+    const lines = fs.readFileSync(argsFile, 'utf8').trim().split(/\r?\n/);
+    const upLine = lines.find((l) => /\bup\b/.test(l));
+    assert.ok(upLine, `应调用 compose up，实际记录：${lines.join(' | ')}`);
+    assert.ok(/(^|\s)-d(\s|$)/.test(upLine),
+      `compose up 必须带 -d，否则前台 attach、脚本永远走不到探活。实际：${upLine}`);
+  } finally {
+    await new Promise((resolve) => healthz.close(resolve));
+    cleanup(fixture.dir, home);
+  }
+}
+
 async function main() {
   if (!hasBash()) {
     const msg = '跳过：当前环境没有 bash，部署脚本无法执行';
@@ -381,6 +592,18 @@ async function main() {
   await test7_PortBusyFailsLoudly();
   await test8_ExistingEnvValueWins();
   test9_WindowsArtifactsAreIgnored();
+  const psAvailable = hasPowershell();
+  if (psAvailable) {
+    await test10_PowerShellQuickstartWritesEnv();
+  } else {
+    console.log('跳过 PowerShell 用例：当前环境没有 powershell / pwsh');
+  }
+  test11_ReadmeOffersBothShells();
+  if (psAvailable) {
+    await test12_PowerShellKeepsExistingMount();
+    await test13_PowerShellReplacesPlaceholderKey();
+    await test14_PowerShellComposeUpIsDetached();
+  }
   console.log('\n全部通过');
   return 0;
 }
