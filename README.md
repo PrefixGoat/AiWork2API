@@ -240,7 +240,7 @@ docker compose build --no-cache --pull && docker compose up -d   # 升级
 ### 目录结构
 
 ```
-aiwork-gateway/
+AiWork2API/
 ├── assets/brand/            # 项目标识
 ├── src/
 │   ├── api-bridge.js        # 核心：鉴权 / 调度 / 记账 / 访问日志
@@ -256,6 +256,12 @@ aiwork-gateway/
 ├── Dockerfile               # 仅桥接层，不捆绑官方 CLI
 └── .env.example             # 配置模板
 ```
+
+### 友情链接
+
+[LINUX DO 社区](https://linux.do/) · 中文技术社区
+
+此链接表达对该社区的致谢与认可，为单向友链，不代表该社区对本项目的背书或隶属关系。
 
 ### 免责与使用边界
 
